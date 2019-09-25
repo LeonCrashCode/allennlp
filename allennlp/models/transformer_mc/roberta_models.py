@@ -332,7 +332,7 @@ class RobertaSpanPredictionModel(Model):
         self._span_end_accuracy = CategoricalAccuracy()
         self._span_accuracy = BooleanAccuracy()
         self._squad_metrics = SquadEmAndF1()
-        self._debug = 2
+        self._debug = 0
         self._padding_value = 1  # The index of the RoBERTa padding token
 
 

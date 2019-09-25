@@ -202,7 +202,7 @@ class TransformerSpanPredictionReader(DatasetReader):
                 if self._syntax == "squad":
                     paragraph_text = paragraph["context"]
                 elif self._syntax == "ropes":
-                    paragraph_text = paragraph["background"]
+                    paragraph_text = " ".join(paragraph["background_segs"])
                 else:
                     raise ValueError(f"Invalid dataset syntax {self._syntax}!")
 
@@ -210,7 +210,7 @@ class TransformerSpanPredictionReader(DatasetReader):
                 if self._ignore_main_context:
                     paragraph_text = ""
                 if self._syntax == "ropes" and not self._ignore_situation_context:
-                        situation_text = paragraph["situation"]
+                        situation_text = " ".join(paragraph["situation_segs"])
                         situation_text = self._add_prefix.get("s", "") + situation_text
                         paragraph_text = paragraph_text + " " + situation_text
 
@@ -230,7 +230,7 @@ class TransformerSpanPredictionReader(DatasetReader):
 
                 for qa in paragraph["qas"]:
                     qas_id = qa["id"]
-                    question_text = qa["question"]
+                    question_text = qa["question_segs"]
                     question_text = self._add_prefix.get("q", "") + question_text
                     question_tokens = []
                     char_to_word_offset_question = []
@@ -254,12 +254,12 @@ class TransformerSpanPredictionReader(DatasetReader):
                     answer_in_passage = True
                     if "answers" in qa:
                         answer_in_passage = True
-                        all_answer_texts = [a["text"] for a in qa["answers"]]
+                        all_answer_texts = [a["text_segs"] for a in qa["answers"]]
                         if version_2_with_negative:
                             is_impossible = qa.get("is_impossible")
                         if not version_2_with_negative or not is_impossible:
                             answer = qa["answers"][0]   # Use first answer for span labeling
-                            orig_answer_text = answer["text"]
+                            orig_answer_text = answer["text_segs"]
                             answer_offset = answer.get("answer_start")
                             answer_length = len(orig_answer_text)
                             start_position = 0

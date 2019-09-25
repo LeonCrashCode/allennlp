@@ -37,7 +37,8 @@ DEFAULT_PREDICTORS = {
         'srl_bert': 'semantic-role-labeling',
         'quarel_parser': 'quarel-parser',
         'wikitables_mml_parser': 'wikitables-parser',
-        'xlnet_mc_qa': 'multiple-choice-qa'
+        'xlnet_mc_qa': 'multiple-choice-qa',
+        'roberta_span_prediction':'span-prediction-ropes',
 }
 
 class Predictor(Registrable):
