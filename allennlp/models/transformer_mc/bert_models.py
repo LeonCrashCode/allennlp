@@ -242,9 +242,6 @@ class BertSpanPredictionModel(Model):
         num_labels = 2  # For start/end
         self.qa_outputs = Linear(transformer_config.hidden_size, num_labels)
 
-        # Import GTP2 machinery to get from tokens to actual text
-        self.byte_decoder = {v: k for k, v in bytes_to_unicode().items()}
-
         self._span_start_accuracy = CategoricalAccuracy()
         self._span_end_accuracy = CategoricalAccuracy()
         self._span_accuracy = BooleanAccuracy()
