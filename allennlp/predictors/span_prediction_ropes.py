@@ -24,12 +24,10 @@ class SpanPredictionRopesPredictor(Predictor):
         Expects JSON that looks like ``{"question": "...", "passage": "..."}``.
         """
 
-        print(json_dict.keys())
         question_text = json_dict["question"]
         background = json_dict["background"]
         situation = json_dict.get("situation")
 
-        print(question_text)
         return self._dataset_reader.text_to_instance(question_text, background, situation)
 
     @overrides
