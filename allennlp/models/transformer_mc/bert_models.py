@@ -13,9 +13,9 @@ from allennlp.data import Vocabulary
 from allennlp.models.archival import load_archive
 from allennlp.models.model import Model
 from allennlp.modules.scalar_mix import ScalarMix
+from allennlp.models.reading_comprehension.util import get_best_span
 from allennlp.nn import RegularizerApplicator, util
-from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy
-
+from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1
 
 @Model.register("bert_mc_qa")
 class BertMCQAModel(Model):
