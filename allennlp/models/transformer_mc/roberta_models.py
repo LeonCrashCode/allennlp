@@ -15,7 +15,7 @@ from allennlp.models.archival import load_archive
 from allennlp.models.model import Model
 from allennlp.models.reading_comprehension.util import get_best_span
 from allennlp.nn import RegularizerApplicator, util
-from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1
+from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1, F1Measure
 
 
 @Model.register("roberta_mc_qa")
@@ -448,6 +448,172 @@ class RobertaSpanPredictionModel(Model):
             'span_acc': self._span_accuracy.get_metric(reset),
             'em': exact_match,
             'f1': f1_score,
+        }
+
+    @classmethod
+    def _load(cls,
+              config: Params,
+              serialization_dir: str,
+              weights_file: str = None,
+              cuda_device: int = -1,
+              **kwargs) -> 'Model':
+        model_params = config.get('model')
+        model_params.update({"on_load": True})
+        config.update({'model': model_params})
+        return super()._load(config=config,
+                             serialization_dir=serialization_dir,
+                             weights_file=weights_file,
+                             cuda_device=cuda_device,
+                             **kwargs)
+
+@Model.register("roberta_sequence_labelling")
+class RobertaSequenceLabelingModel(Model):
+    """
+
+    """
+    def __init__(self,
+                 vocab: Vocabulary,
+                 pretrained_model: str = None,
+                 requires_grad: bool = True,
+                 transformer_weights_model: str = None,
+                 layer_freeze_regexes: List[str] = None,
+                 on_load: bool = False,
+                 regularizer: Optional[RegularizerApplicator] = None) -> None:
+        super().__init__(vocab, regularizer)
+
+        if on_load:
+            logging.info(f"Skipping loading of initial Transformer weights")
+            transformer_config = RobertaConfig.from_pretrained(pretrained_model)
+            self._transformer_model = RobertaModel(transformer_config)
+
+        elif transformer_weights_model:
+            logging.info(f"Loading Transformer weights model from {transformer_weights_model}")
+            transformer_model_loaded = load_archive(transformer_weights_model)
+            self._transformer_model = transformer_model_loaded.model._transformer_model
+        else:
+            self._transformer_model = RobertaModel.from_pretrained(pretrained_model)
+
+        for name, param in self._transformer_model.named_parameters():
+            grad = requires_grad
+            if layer_freeze_regexes and grad:
+                grad = not any([bool(re.search(r, name)) for r in layer_freeze_regexes])
+            param.requires_grad = grad
+
+        transformer_config = self._transformer_model.config
+        
+        self.UR_outputs = Linear(transformer_config.hidden_size, 3) #U, R, O
+        self.M_outputs = Linear(transformer_config.hidden_size, 2) #M, O
+        # Import GTP2 machinery to get from tokens to actual text
+        self.byte_decoder = {v: k for k, v in bytes_to_unicode().items()}
+
+        self._UR_accuracy = CategoricalAccuracy()
+        self._M_accuracy = CategoricalAccuracy()
+
+        self._U_F1 = F1Measure(self.vocab.add_token_to_namespace("U", "ur_tags"))
+        self._R_F1 = F1Measure(self.vocab.add_token_to_namespace("R", "ur_tags"))
+        self._M_F1 = F1Measure(self.vocab.add_token_to_namespace("M", "m_tags"))
+
+        self._debug = 0
+        self._padding_value = 1  # The index of the RoBERTa padding token
+
+
+    def forward(self,
+                tokens: Dict[str, torch.LongTensor],
+                segment_ids: torch.LongTensor = None,
+                UR_tags: torch.LongTensor = None,
+                M_tags: torch.LongTensor = None,
+                metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
+
+        self._debug -= 1
+        input_ids = tokens['tokens']
+
+        batch_size = input_ids.size(0)
+        sequence_length = input_ids.size(1)
+
+        tokens_mask = (input_ids != self._padding_value).long()
+
+        if self._debug > 0:
+            print(f"batch_size = {batch_size}")
+            print(f"sequence_length = {sequence_length}")
+            print(f"tokens_mask = {tokens_mask}")
+            print(f"input_ids.size() = {input_ids.size()}")
+            print(f"input_ids = {input_ids}")
+            print(f"segment_ids = {segment_ids}")
+            print(f"UR_tags = {UR_tags}")
+            print(f"M_tags = {M_tags}")
+        # Segment ids are not used by RoBERTa
+
+        transformer_outputs = self._transformer_model(input_ids=input_ids,
+                                                      # token_type_ids=segment_ids,
+                                                      attention_mask=tokens_mask)
+        sequence_output = transformer_outputs[0]
+
+        UR = self.UR_outputs(sequence_output)
+        M = self.M_outputs(sequence_output)
+
+        UR_probs = util.masked_softmax(UR, mask=None)
+        M_probs = util.masked_softmax(M, mask=None)
+
+        best_UR = UR_probs.argmax(-1)
+        best_M = M_probs.argmax(-1)
+
+        output_dict = {}
+
+        if UR_tags is not None and M_tags is not None:
+            # If we are on multi-GPU, split add a dimension
+
+            self._UR_accuracy(UR_probs, UR_tags, tokens_mask)
+            self._M_accuracy(M_probs, M_tags, tokens_mask)
+
+            self._U_F1(UR_probs, UR_tags, tokens_mask)
+            self._R_F1(UR_probs, UR_tags, tokens_mask)
+            self._M_F1(M_probs, M_tags, tokens_mask)
+
+            
+            UR_loss = util.sequence_cross_entropy_with_logits(UR, UR_tags, tokens_mask, average="token")
+            M_loss = util.sequence_cross_entropy_with_logits(M, M_tags, tokens_mask, average="token")
+
+            total_loss = (UR_loss + M_loss) / 2
+            output_dict["loss"] = total_loss
+
+        # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
+        if metadata is not None:
+            best_UR = best_UR.cpu().data.numpy()
+            best_M = best_M.cpu().data.numpy()
+            output_dict['best_UR'] = []
+            output_dict['best_M'] = []
+            output_dict['qid'] = []
+            tokens_texts = []
+            for i in range(batch_size):
+                tokens_text = metadata[i]['tokens']
+                tokens_texts.append(tokens_text)
+                output_dict['best_UR'].append(
+                    [self.vocab.get_token_from_index(x, namespace="ur_tags") for x in best_UR[i][:len(tokens_text)]]
+                    )
+                output_dict['best_M'].append(
+                    [self.vocab.get_token_from_index(x, namespace="m_tags") for x in best_M[i][:len(tokens_text)]]
+                    )
+                output_dict['qid'].append(metadata[i]['id'])
+            output_dict['tokens_texts'] = tokens_texts
+
+        if self._debug > 0:
+            print(f"output_dict = {output_dict}")
+
+        return output_dict
+
+    def convert_tokens_to_string(self, tokens):
+        """ Converts a sequence of tokens (string) in a single string. """
+        text = ''.join(tokens)
+        text = bytearray([self.byte_decoder[c] for c in text]).decode('utf-8', errors='replace')
+        return text
+
+    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
+        return {
+            'ur_acc': self._UR_accuracy.get_metric(reset),
+            'm_acc': self._M_accuracy.get_metric(reset),
+            'u_f1': self._U_F1.get_metric(reset)[2],
+            'r_f1': self._R_F1.get_metric(reset)[2],
+            'm_f1': self._M_F1.get_metric(reset)[2]
         }
 
     @classmethod

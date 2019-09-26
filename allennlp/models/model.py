@@ -144,6 +144,7 @@ class Model(torch.nn.Module, Registrable):
         -------
         A list of the models output for each instance.
         """
+        print("111111111")
         batch_size = len(instances)
         with torch.no_grad():
             cuda_device = self._get_prediction_device()

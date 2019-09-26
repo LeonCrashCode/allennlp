@@ -48,7 +48,7 @@ class TrainerPieces(NamedTuple):
 
         logger.info("From dataset instances, %s will be considered for vocabulary creation.",
                     ", ".join(datasets_for_vocab_creation))
-
+        
         if recover and os.path.exists(os.path.join(serialization_dir, "vocabulary")):
             vocab = Vocabulary.from_files(os.path.join(serialization_dir, "vocabulary"))
             params.pop("vocabulary", {})
