@@ -320,6 +320,7 @@ class BertSpanPredictionModel(Model):
             output_dict['best_span_str'] = []
             output_dict['exact_match'] = []
             output_dict['f1_score'] = []
+            output_dict['qid'] = []
             tokens_texts = []
             for i in range(batch_size):
                 tokens_text = metadata[i]['tokens']
@@ -337,6 +338,7 @@ class BertSpanPredictionModel(Model):
                     exact_match, f1_score = self._squad_metrics(best_span_string, answer_texts)
                 output_dict['exact_match'].append(exact_match)
                 output_dict['f1_score'].append(f1_score)
+                output_dict['qid'].append(metadata[i]['id'])
             output_dict['tokens_texts'] = tokens_texts
 
         if self._debug > 0:

@@ -230,7 +230,10 @@ class TransformerSpanPredictionReader(DatasetReader):
 
                 for qa in paragraph["qas"]:
                     qas_id = qa["id"]
-                    question_text = qa["question_segs"]
+                    if self._syntax == "ropes":
+                        question_text = qa["question_segs"]
+                    else:
+                        question_text = qa["question"]
                     question_text = self._add_prefix.get("q", "") + question_text
                     question_tokens = []
                     char_to_word_offset_question = []
@@ -254,12 +257,18 @@ class TransformerSpanPredictionReader(DatasetReader):
                     answer_in_passage = True
                     if "answers" in qa:
                         answer_in_passage = True
-                        all_answer_texts = [a["text_segs"] for a in qa["answers"]]
+                        if self._syntax == "ropes":
+                            all_answer_texts = [a["text_segs"] for a in qa["answers"]]
+                        else:
+                            all_answer_texts = [a["text"] for a in qa["answers"]]
                         if version_2_with_negative:
                             is_impossible = qa.get("is_impossible")
                         if not version_2_with_negative or not is_impossible:
                             answer = qa["answers"][0]   # Use first answer for span labeling
-                            orig_answer_text = answer["text_segs"]
+                            if self._syntax == "ropes":
+                                orig_answer_text = answer["text_segs"]
+                            else:
+                                orig_answer_text = answer["text"]
                             answer_offset = answer.get("answer_start")
                             answer_length = len(orig_answer_text)
                             start_position = 0
