@@ -526,13 +526,13 @@ class RobertaSequenceLabelingModel(Model):
 
         self._U_F1 = F1Measure(self._U_idx)
 
-        self._R_F1 = FBetaMeasure(self._R_idx)
-        self._R_F1_micro = FBetaMeasure(self._R_idx, average="micro")
-        self._R_F1_macro = FBetaMeasure(self._R_idx, average="macro")
+        self._R_F1 = FBetaMeasure(labels=self._R_idx)
+        self._R_F1_micro = FBetaMeasure(labels=self._R_idx, average="micro")
+        self._R_F1_macro = FBetaMeasure(labels=self._R_idx, average="macro")
 
-        self._M_F1 = FBetaMeasure(self._M_idx)
-        self._M_F1_micro = FBetaMeasure(self._M_idx, average="micro")
-        self._M_F1_macro = FBetaMeasure(self._M_idx, average="macro")
+        self._M_F1 = FBetaMeasure(labels=self._M_idx)
+        self._M_F1_micro = FBetaMeasure(labels=self._M_idx, average="micro")
+        self._M_F1_macro = FBetaMeasure(labels=self._M_idx, average="macro")
 
         self._debug = 0
         self._padding_value = 1  # The index of the RoBERTa padding token
