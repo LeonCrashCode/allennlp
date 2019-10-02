@@ -527,12 +527,12 @@ class RobertaSequenceLabelingModel(Model):
         self._U_F1 = F1Measure(self._U_idx)
 
         self._R_F1 = FBetaMeasure(labels=self._R_idx)
-        self._R_F1_micro = FBetaMeasure(labels=self._R_idx, average="micro")
-        self._R_F1_macro = FBetaMeasure(labels=self._R_idx, average="macro")
+        # self._R_F1_micro = FBetaMeasure(labels=self._R_idx, average="micro")
+        # self._R_F1_macro = FBetaMeasure(labels=self._R_idx, average="macro")
 
         self._M_F1 = FBetaMeasure(labels=self._M_idx)
-        self._M_F1_micro = FBetaMeasure(labels=self._M_idx, average="micro")
-        self._M_F1_macro = FBetaMeasure(labels=self._M_idx, average="macro")
+        # self._M_F1_micro = FBetaMeasure(labels=self._M_idx, average="micro")
+        # self._M_F1_macro = FBetaMeasure(labels=self._M_idx, average="macro")
 
         self._debug = 0
         self._padding_value = 1  # The index of the RoBERTa padding token
@@ -588,12 +588,12 @@ class RobertaSequenceLabelingModel(Model):
 
             self._U_F1(UR_probs, UR_tags, tokens_mask)
             self._R_F1(UR_probs, UR_tags, tokens_mask)
-            self._R_F1_micro(UR_probs, UR_tags, tokens_mask)
-            self._R_F1_macro(UR_probs, UR_tags, tokens_mask)
+            # self._R_F1_micro(UR_probs, UR_tags, tokens_mask)
+            # self._R_F1_macro(UR_probs, UR_tags, tokens_mask)
 
             self._M_F1(M_probs, M_tags, tokens_mask)
-            self._M_F1_micro(M_probs, M_tags, tokens_mask)
-            self._M_F1_macro(M_probs, M_tags, tokens_mask)
+            # self._M_F1_micro(M_probs, M_tags, tokens_mask)
+            # self._M_F1_macro(M_probs, M_tags, tokens_mask)
 
             
             UR_loss = util.sequence_cross_entropy_with_logits(UR, UR_tags, tokens_mask, average="token")
@@ -638,37 +638,51 @@ class RobertaSequenceLabelingModel(Model):
         results = {'_ur_acc': self._UR_accuracy.get_metric(reset),'_m_acc': self._M_accuracy.get_metric(reset)}
 
         results['_u_pre'], results['_u_rec'], results['u_f1']  = self._U_F1.get_metric(reset)
-        subresults = self._R_F1_micro.get_metric(reset)
-        results['_r_micro_pre'] = subresults['precision']
-        results['_r_micro_rec'] = subresults['recall']
-        results['r_micro_f1'] = subresults['fscore']
+        # subresults = self._R_F1_micro.get_metric(reset)
+        # results['_r_micro_pre'] = subresults['precision']
+        # results['_r_micro_rec'] = subresults['recall']
+        # results['r_micro_f1'] = subresults['fscore']
 
-        subresults = self._R_F1_macro.get_metric(reset)
-        results['_r_macro_pre'] = subresults['precision']
-        results['_r_macro_rec'] = subresults['recall']
-        results['r_macro_f1'] = subresults['fscore']
+        # subresults = self._R_F1_macro.get_metric(reset)
+        # results['_r_macro_pre'] = subresults['precision']
+        # results['_r_macro_rec'] = subresults['recall']
+        # results['r_macro_f1'] = subresults['fscore']
 
-        subresults = self._M_F1_micro.get_metric(reset)
-        results['_m_micro_pre'] = subresults['precision']
-        results['_m_micro_rec'] = subresults['recall']
-        results['m_micro_f1'] = subresults['fscore']
+        # subresults = self._M_F1_micro.get_metric(reset)
+        # results['_m_micro_pre'] = subresults['precision']
+        # results['_m_micro_rec'] = subresults['recall']
+        # results['m_micro_f1'] = subresults['fscore']
 
-        subresults = self._M_F1_macro.get_metric(reset)
-        results['_m_macro_pre'] = subresults['precision']
-        results['_m_macro_rec'] = subresults['recall']
-        results['m_macro_f1'] = subresults['fscore']     
+        # subresults = self._M_F1_macro.get_metric(reset)
+        # results['_m_macro_pre'] = subresults['precision']
+        # results['_m_macro_rec'] = subresults['recall']
+        # results['m_macro_f1'] = subresults['fscore']     
 
         subresults = self._R_F1.get_metric(reset)
+        p = r = f = 0.0
         for i in self._R_idx:
             results['_'+self.vocab.get_token_from_index(i, namespace="ur_tags")+"_pre"] = subresults["precision"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="ur_tags")+"_rec"] = subresults["recall"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="ur_tags")+"_f1"] = subresults["fscore"][i]
+            p += subresults["precision"][i]
+            r += subresults["recall"][i]
+            f += subresults["fscore"][i]
+        results['_r_macro_pre'] = p / len(self._R_idx)
+        results['_r_macro_rec'] = r / len(self._R_idx)
+        results['r_macro_f1'] = f / len(self._R_idx)
 
         subresults = self._M_F1.get_metric(reset)
+        p = r = f = 0.0
         for i in self._M_idx:
             results['_'+self.vocab.get_token_from_index(i, namespace="m_tags")+"_pre"] = subresults["precision"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="m_tags")+"_rec"] = subresults["recall"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="m_tags")+"_f1"] = subresults["fscore"][i]
+            p += subresults["precision"][i]
+            r += subresults["recall"][i]
+            f += subresults["fscore"][i]
+        results['_m_macro_pre'] = p / len(self._M_idx)
+        results['_m_macro_rec'] = r / len(self._M_idx)
+        results['m_macro_f1'] = f / len(self._M_idx)
         
         return results
 
