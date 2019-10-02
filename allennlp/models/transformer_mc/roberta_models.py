@@ -501,8 +501,8 @@ class RobertaSequenceLabelingModel(Model):
 
         transformer_config = self._transformer_model.config
         
-        self.UR_outputs = Linear(transformer_config.hidden_size, 3) #U, R, O
-        self.M_outputs = Linear(transformer_config.hidden_size, 2) #M, O
+        self.UR_outputs = Linear(transformer_config.hidden_size, self.vocab.get_vocab_size(namespace="ur_tags")) #U, R, O
+        self.M_outputs = Linear(transformer_config.hidden_size, self.vocab.get_vocab_size(namespace="m_tags")) #M, O
         # Import GTP2 machinery to get from tokens to actual text
         self.byte_decoder = {v: k for k, v in bytes_to_unicode().items()}
 
