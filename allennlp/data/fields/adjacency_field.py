@@ -50,6 +50,8 @@ class AdjacencyField(Field[torch.Tensor]):
                  sequence_field: SequenceField,
                  labels: List[str] = None,
                  label_namespace: str = 'labels',
+                 undirected: bool = False,
+                 dtype: torch.Tensor = None,
                  padding_value: int = -1) -> None:
         self.indices = indices
         self.labels = labels
@@ -57,9 +59,18 @@ class AdjacencyField(Field[torch.Tensor]):
         self._label_namespace = label_namespace
         self._padding_value = padding_value
         self._indexed_labels: List[int] = None
-
+        self._dtype = dtype
         self._maybe_warn_for_namespace(label_namespace)
         field_length = sequence_field.sequence_length()
+
+        if undirected:
+            length = len(self.indices)
+            i = 0
+            while i < length:
+                self.indices.append(self.indices[i][::-1])
+                if labels:
+                    self.labels.append(labels[i])
+                i += 1
 
         if len(set(indices)) != len(indices):
             raise ConfigurationError(f"Indices must be unique, but found {indices}")
@@ -101,7 +112,7 @@ class AdjacencyField(Field[torch.Tensor]):
     @overrides
     def as_tensor(self, padding_lengths: Dict[str, int]) -> torch.Tensor:
         desired_num_tokens = padding_lengths['num_tokens']
-        tensor = torch.ones(desired_num_tokens, desired_num_tokens) * self._padding_value
+        tensor = torch.ones(desired_num_tokens, desired_num_tokens, dtype=self._dtype) * self._padding_value
         labels = self._indexed_labels or [1 for _  in range(len(self.indices))]
 
         for index, label in zip(self.indices, labels):

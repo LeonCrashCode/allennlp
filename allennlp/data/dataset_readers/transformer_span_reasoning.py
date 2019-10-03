@@ -6,6 +6,7 @@ import logging
 import numpy
 import os
 import re
+import torch
 
 from overrides import overrides
 
@@ -13,10 +14,10 @@ from allennlp.common.file_utils import cached_path
 from allennlp.common.tqdm import Tqdm
 from allennlp.common.util import JsonDict
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
-from allennlp.data.fields import Field, TextField, LabelField
+from allennlp.data.fields import Field, TextField, LabelField, SpanField, AdjacencyField, ListField
 from allennlp.data.fields import MetadataField, SequenceLabelField
 from allennlp.data.instance import Instance
-from allennlp.data.token_indexers import PretrainedTransformerIndexer
+from allennlp.data.token_indexers import PretrainedTransformerIndexer, SingleIdTokenIndexer
 from allennlp.data.tokenizers import Token, PretrainedTransformerTokenizer
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
@@ -57,6 +58,7 @@ class TransformerSpanReasoningReader(DatasetReader):
         self._tokenizer_internal = self._tokenizer._tokenizer
         token_indexer = PretrainedTransformerIndexer(pretrained_model, do_lowercase=do_lowercase)
         self._token_indexers = {'tokens': token_indexer}
+        self._edge_indexers = {'tokens': SingleIdTokenIndexer()}
 
         self._max_pieces = max_pieces
         self._sample = sample
@@ -146,42 +148,38 @@ class TransformerSpanReasoningReader(DatasetReader):
     def _example_to_instance(self, example, debug):
         fields: Dict[str, Field] = {}
         features = self._transformer_features_from_example(example, debug)
+
         tokens_field = TextField(features.tokens, self._token_indexers)
         segment_ids_field = SequenceLabelField(features.segment_ids, tokens_field)
-
         fields['tokens'] = tokens_field
         fields['segment_ids'] = segment_ids_field
 
-        metadata = {
-            "id": features.unique_id,
-            "question_text": example.question_text,
-            "tokens": [x.text for x in features.tokens],
-            "context_full": example.doc_text,
-            "answer_texts": example.all_answer_texts,
-            "answer_mask": features.p_mask
-        }
+        chunks_field = ListField([SpanField(chunk[0], chunk[1], tokens_field) for chunk in features.chunks])
+        sentence_graph_field = AdjacencyField(features.sentence_graph, chunks_field, padding_value=0, dtype=torch.long, undirected=True)
+        corefs_field = AdjacencyField(features.corefs, chunks_field, dtype=torch.long, undirected=True, labels=features.corefs_label, padding_value=0, label_namespace="edges")
+        cands_field = AdjacencyField(features.cands, chunks_field, dtype=torch.long, labels=features.cands_label, padding_value=0, label_namespace="edges")
 
-        if features.start_position is not None:
-            fields['start_positions'] = LabelField(features.start_position, skip_indexing=True)
-            fields['end_positions'] = LabelField(features.end_position, skip_indexing=True)
-            metadata['start_positions'] = features.start_position
-            metadata['end_positions'] = features.end_position
+        fields['chunks'] = chunks_field
+        fields['sentence_graph'] = sentence_graph_field
+        fields['corefs'] = corefs_field
+        fields['cands'] = cands_field
 
+        fields['cands_start'] = LabelField(features.cands_start, skip_indexing=True)
+        fields['cands_end'] = LabelField(features.cands_end, skip_indexing=True)
+
+        metadata = {}
+        metadata['qas_id'] = example.qas_id
         if debug > 0:
             logger.info(f"tokens = {features.tokens}")
             logger.info(f"segment_ids = {features.segment_ids}")
-            logger.info(f"context = {example.doc_text}")
-            logger.info(f"question = {example.question_text}")
-            logger.info(f"answer_mask = {features.p_mask}")
-            if features.start_position is not None and features.start_position >= 0:
-                logger.info(f"start_position = {features.start_position}")
-                logger.info(f"end_position = {features.end_position}")
-                logger.info(f"orig_answer_text   = {example.orig_answer_text}")
-                answer_text = self._string_from_tokens(features.tokens[features.start_position:(features.end_position + 1)])
-                logger.info(f"answer from tokens = {answer_text}")
+            logger.info(f"chunks = {features.chunks}")
+            logger.info(f"sentence_graph = {features.sentence_graph}")
+            logger.info(f"corefs = {features.corefs}")
+            logger.info(f"corefs_label = {features.corefs_label}")
+            logger.info(f"cands = {features.cands}")
+            logger.info(f"cands_label = {features.cands_label}")
 
         fields["metadata"] = MetadataField(metadata)
-
         return Instance(fields)
 
     def _read_squad_examples(self, input_file):
@@ -420,7 +418,7 @@ class TransformerSpanReasoningReader(DatasetReader):
         start_offset = 0
         if len(all_doc_tokens) > max_tokens_for_doc:
             all_doc_tokens = all_doc_tokens[-max_tokens_for_doc:]
-            start_offset = token_to_orig_map[-max_tokens_for_doc]
+            start_offset = tok_to_orig_index[-max_tokens_for_doc]
 
 
         ndelchunk = 0
@@ -428,6 +426,7 @@ class TransformerSpanReasoningReader(DatasetReader):
             if chunk[0] >= start_offset:
                 break
             ndelchunk += 1
+
         example.doc_chunks = example.doc_chunks[ndelchunk:]
         for chunk in example.doc_chunks:
             chunk[0] -= start_offset
@@ -437,21 +436,25 @@ class TransformerSpanReasoningReader(DatasetReader):
             chunk[1] -= start_offset
 
         if ndelchunk != 0:
-            ncorefs = []
-            for coref in example.corefs:
-                if coref[0] < ndelchunk or coref[1] < ndelchunk:
+            edges = []
+            for edge in example.corefs:
+                if edge[0] < ndelchunk or edge[1] < ndelchunk:
                     pass
                 else:
-                    ncorefs.append(coref)
-            example.corefs = ncorefs
-            ncorefs = []
-            for coref in example.sentence_graph:
-                if coref[0] < ndelchunk or coref[1] < ndelchunk:
-                    pass
-                else:
-                    ncorefs.append(coref)
-            example.sentence_graph = ncorefs
+                    edge[0] -= ndelchunk
+                    edge[1] -= ndelchunk
+                    edges.append(edge)
+            example.corefs = edges
 
+            edges = []
+            for edge in example.sentence_graph:
+                if edge[0] < ndelchunk or edge[1] < ndelchunk:
+                    pass
+                else:
+                    edge[0] -= ndelchunk
+                    edge[1] -= ndelchunk
+                    edges.append(edge)
+            example.sentence_graph = edges
 
 
         # We can have documents that are longer than the maximum sequence length.
@@ -501,18 +504,36 @@ class TransformerSpanReasoningReader(DatasetReader):
                 chunk[0] += 1
                 chunk[1] += 1
 
+        # corefs
+        corefs = []
+        for coref in example.corefs:
+            corefs.append(tuple(coref))
         corefs_label = ["coref"] * len(example.corefs)
 
-        chunks = example.doc_chunks + example.q_chunks
+        # chunks
+        chunks = []
+        for chunk in example.doc_chunks:
+            chunks.append(tuple(chunk))
+        for chunk in example.q_chunks:
+            chunks.append(tuple(chunk))
+
+        # cands
         cands = []
         cands_label = []
         cands_start = len(chunks)
         cands_end = cands_start
         for cand in example.cands:
             for cc in cand:
-                cands.append([cc[0], cands_end])
+                cands.append(tuple([cc[0]-ndelchunk, cands_end]))
                 cands_label.append(cc[1])
             cands_end += 1
+            #add candidate chunks default [0, 0], make sense?
+            chunks.append([0, 0])
+
+        #setence graph
+        sentence_graph = []
+        for sent in example.sentence_graph:
+            sentence_graph.append(tuple(sent))
 
 
         if debug > 0:
@@ -521,21 +542,21 @@ class TransformerSpanReasoningReader(DatasetReader):
             logger.info(f"tokens: {tokens}")
             logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
             logger.info(f"chunks: {chunks}" )
-            logger.info(f"corefs: {example.corefs}" )
+            logger.info(f"corefs: {corefs}" )
             logger.info(f"corefs_label: {corefs_label}" )
             logger.info(f"cands: {cands}" )
             logger.info(f"cands_label: {cands_label}" )
             logger.info(f"cands_start: {cands_start}" )
             logger.info(f"cands_end: {cands_end}" )
-        exit()
+
         return InputFeatures(
                     unique_id=example.qas_id,
                     tokens=tokens,
                     segment_ids=segment_ids,
                     cls_index=cls_index,
                     chunks=chunks,
-                    sentence_graph=example.sequence_graph,
-                    corefs=example.corefs,
+                    sentence_graph=sentence_graph,
+                    corefs=corefs,
                     corefs_label=corefs_label,
                     cands=cands,
                     cands_label=cands_label,
@@ -657,7 +678,7 @@ class InputFeatures(object):
         self.chunks = chunks
         self.sentence_graph=sentence_graph
         self.corefs = corefs
-        self.corefs = corefs_label
+        self.corefs_label = corefs_label
         self.cands = cands
         self.cands_label = cands_label
         self.cands_start = cands_start
