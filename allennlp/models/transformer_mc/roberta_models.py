@@ -825,7 +825,7 @@ class RobertaSequenceLabelingModel(Model):
         subresults = self._UR_F1.get_metric(reset)
         results["_U_pre"] = subresults["precision"][self._U_idx]
         results["_U_rec"] = subresults["recall"][self._U_idx]
-        results["_U_f1"] = subresults["fscore"][self._U_idx]
+        results["U_f1"] = subresults["fscore"][self._U_idx]
         p = r = f = 0.0
         cnt = 0.0
         for i in range(self.vocab.get_vocab_size(namespace="ur_tags")):
@@ -855,9 +855,9 @@ class RobertaSequenceLabelingModel(Model):
             r += subresults["recall"][i]
             f += subresults["fscore"][i]
             cnt += 1
-        results['_R_macro_pre'] = p / cnt
-        results['_R_macro_rec'] = r / cnt
-        results['R_macro_f1'] = f / cnt        
+        results['_M_macro_pre'] = p / cnt
+        results['_M_macro_rec'] = r / cnt
+        results['M_macro_f1'] = f / cnt        
         return results
 
     @classmethod
