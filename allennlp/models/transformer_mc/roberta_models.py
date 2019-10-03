@@ -819,6 +819,7 @@ class RobertaSequenceLabelingModel(Model):
                     [self.vocab.get_token_from_index(x, namespace="m_tags") for x in best_M[i][:len(tokens_text)]]
                     )
                 output_dict['qid'].append(metadata[i]['id'])
+                output_dict['token_to_orig_map'].append(metadata[i]['token_to_orig_map'])
             output_dict['tokens_texts'] = tokens_texts
 
         if self._debug > 0:

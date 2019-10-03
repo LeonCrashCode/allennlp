@@ -131,6 +131,7 @@ class TransformerSequenceLabellingReader(DatasetReader):
             "id": item_id,
             "sent": sent,
             "tokens": [x.text for x in tokens],
+            "token_to_orig_map": token_to_orig_map
         }
 
         if UR is not None and M is not None:
