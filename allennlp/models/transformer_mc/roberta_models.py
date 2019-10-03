@@ -708,28 +708,13 @@ class RobertaSequenceLabelingModel(Model):
         self._UR_accuracy = CategoricalAccuracy()
         self._M_accuracy = CategoricalAccuracy()
 
-        self._U_idx = self.vocab.add_tokens_to_namespace("U", namespace="ur_tags")
+        self._U_idx = self.vocab.add_token_to_namespace("U", namespace="ur_tags")
 
-        self._R_idx = []
-        for i in range(self.vocab.get_vocab_size(namespace="ur_tags")):
-            if i == self._U_idx or i == self.vocab.add_tokens_to_namespace("O", namespace="ur_tags"):
-                continue
-            self._R_idx.append(i)
-
-        self._M_idx = []
-        for i in range(self.vocab.get_vocab_size(namespace="m_tags")):
-            if i == self.vocab.add_tokens_to_namespace("O", namespace="m_tags"):
-                continue
-            self._M_idx.append(i)
-
-
-        self._U_F1 = F1Measure(self._U_idx)
-
-        self._R_F1 = FBetaMeasure(labels=self._R_idx)
+        self._UR_F1 = FBetaMeasure()
         # self._R_F1_micro = FBetaMeasure(labels=self._R_idx, average="micro")
         # self._R_F1_macro = FBetaMeasure(labels=self._R_idx, average="macro")
 
-        self._M_F1 = FBetaMeasure(labels=self._M_idx)
+        self._M_F1 = FBetaMeasure()
         # self._M_F1_micro = FBetaMeasure(labels=self._M_idx, average="micro")
         # self._M_F1_macro = FBetaMeasure(labels=self._M_idx, average="macro")
 
@@ -785,8 +770,7 @@ class RobertaSequenceLabelingModel(Model):
             self._UR_accuracy(UR_probs, UR_tags, tokens_mask)
             self._M_accuracy(M_probs, M_tags, tokens_mask)
 
-            self._U_F1(UR_probs, UR_tags, tokens_mask)
-            self._R_F1(UR_probs, UR_tags, tokens_mask)
+            self._UR_F1(UR_probs, UR_tags, tokens_mask)
             # self._R_F1_micro(UR_probs, UR_tags, tokens_mask)
             # self._R_F1_macro(UR_probs, UR_tags, tokens_mask)
 
@@ -808,6 +792,7 @@ class RobertaSequenceLabelingModel(Model):
             output_dict['best_UR'] = []
             output_dict['best_M'] = []
             output_dict['qid'] = []
+            output_dict['token_to_orig_map'] = []
             tokens_texts = []
             for i in range(batch_size):
                 tokens_text = metadata[i]['tokens']
@@ -835,55 +820,44 @@ class RobertaSequenceLabelingModel(Model):
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
 
-        results = {'_ur_acc': self._UR_accuracy.get_metric(reset),'_m_acc': self._M_accuracy.get_metric(reset)}
+        results = {'_ur_acc': self._UR_accuracy.get_metric(reset),'_m_acc': self._M_accuracy.get_metric(reset)}  
 
-        results['_u_pre'], results['_u_rec'], results['u_f1']  = self._U_F1.get_metric(reset)
-        # subresults = self._R_F1_micro.get_metric(reset)
-        # results['_r_micro_pre'] = subresults['precision']
-        # results['_r_micro_rec'] = subresults['recall']
-        # results['r_micro_f1'] = subresults['fscore']
-
-        # subresults = self._R_F1_macro.get_metric(reset)
-        # results['_r_macro_pre'] = subresults['precision']
-        # results['_r_macro_rec'] = subresults['recall']
-        # results['r_macro_f1'] = subresults['fscore']
-
-        # subresults = self._M_F1_micro.get_metric(reset)
-        # results['_m_micro_pre'] = subresults['precision']
-        # results['_m_micro_rec'] = subresults['recall']
-        # results['m_micro_f1'] = subresults['fscore']
-
-        # subresults = self._M_F1_macro.get_metric(reset)
-        # results['_m_macro_pre'] = subresults['precision']
-        # results['_m_macro_rec'] = subresults['recall']
-        # results['m_macro_f1'] = subresults['fscore']     
-
-        subresults = self._R_F1.get_metric(reset)
+        subresults = self._UR_F1.get_metric(reset)
+        results["_U_pre"] = subresults["precision"][self._U_idx]
+        results["_U_rec"] = subresults["recall"][self._U_idx]
+        results["_U_f1"] = subresults["fscore"][self._U_idx]
         p = r = f = 0.0
-        for i in self._R_idx:
+        cnt = 0.0
+        for i in range(self.vocab.get_vocab_size(namespace="ur_tags")):
+            if i == self._U_idx or self.vocab.get_token_from_index(i, namespace="ur_tags") == "O":
+                continue
             results['_'+self.vocab.get_token_from_index(i, namespace="ur_tags")+"_pre"] = subresults["precision"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="ur_tags")+"_rec"] = subresults["recall"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="ur_tags")+"_f1"] = subresults["fscore"][i]
             p += subresults["precision"][i]
             r += subresults["recall"][i]
             f += subresults["fscore"][i]
-        results['_r_macro_pre'] = p / len(self._R_idx)
-        results['_r_macro_rec'] = r / len(self._R_idx)
-        results['r_macro_f1'] = f / len(self._R_idx)
+            cnt += 1
+        results['_R_macro_pre'] = p / cnt
+        results['_R_macro_rec'] = r / cnt
+        results['R_macro_f1'] = f / cnt
 
         subresults = self._M_F1.get_metric(reset)
         p = r = f = 0.0
-        for i in self._M_idx:
+        cnt = 0.0
+        for i in range(self.vocab.get_vocab_size(namespace="m_tags")):
+            if self.vocab.get_token_from_index(i, namespace="m_tags") == "O":
+                continue
             results['_'+self.vocab.get_token_from_index(i, namespace="m_tags")+"_pre"] = subresults["precision"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="m_tags")+"_rec"] = subresults["recall"][i]
             results['_'+self.vocab.get_token_from_index(i, namespace="m_tags")+"_f1"] = subresults["fscore"][i]
             p += subresults["precision"][i]
             r += subresults["recall"][i]
             f += subresults["fscore"][i]
-        results['_m_macro_pre'] = p / len(self._M_idx)
-        results['_m_macro_rec'] = r / len(self._M_idx)
-        results['m_macro_f1'] = f / len(self._M_idx)
-        
+            cnt += 1
+        results['_R_macro_pre'] = p / cnt
+        results['_R_macro_rec'] = r / cnt
+        results['R_macro_f1'] = f / cnt        
         return results
 
     @classmethod
