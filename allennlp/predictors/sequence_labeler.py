@@ -12,11 +12,11 @@ from allennlp.data.fields import (IndexField, ListField, LabelField, SpanField, 
                                   SequenceField)
 
 
-@Predictor.register('sequence-labeling-gec')
-class SequenceLabelingGECPredictor(Predictor):
+@Predictor.register('sequence-labelling-gec')
+class SequenceLabellingGECPredictor(Predictor):
 
     def predict(self, sentence: str) -> JsonDict:
-        return self.predict_json({"background": sentence})
+        return self.predict_json({"sentence": sentence})
 
     @overrides
     def _json_to_instance(self, json_dict: JsonDict) -> Instance:
@@ -24,21 +24,13 @@ class SequenceLabelingGECPredictor(Predictor):
         Expects JSON that looks like ``{"question": "...", "passage": "..."}``.
         """
 
-        question_text = json_dict["question"]
-        background = json_dict["background"]
-        situation = json_dict.get("situation")
-
-        return self._dataset_reader.text_to_instance(question_text, background, situation)
+        sentence = json_dict["tokens"]
+        item_id = json_dict["id"]
+        return self._dataset_reader.text_to_instance(item_id=item_id, sent=sentence)
 
     @overrides
     def predict_json(self, inputs: JsonDict) -> JsonDict:
         instance = self._json_to_instance(inputs)
         output = self.predict_instance(instance)
         # outputs = self._model.forward_on_instance(instance)
-
-        best_span = output['best_span']
-        confidence = output['start_probs'][best_span[0]] * output['end_probs'][best_span[1]]
-
-        output['confidence'] = confidence
-
         return output

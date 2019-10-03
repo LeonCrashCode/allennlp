@@ -40,6 +40,7 @@ DEFAULT_PREDICTORS = {
         'xlnet_mc_qa': 'multiple-choice-qa',
         'roberta_span_prediction':'span-prediction-ropes',
         'bert_span_prediction':'span-prediction-ropes',
+        'roberta_sequence_labelling':'sequence-labelling-gec',
 }
 
 class Predictor(Registrable):
