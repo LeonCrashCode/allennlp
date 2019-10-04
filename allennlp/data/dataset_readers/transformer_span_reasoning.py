@@ -525,7 +525,7 @@ class TransformerSpanReasoningReader(DatasetReader):
         cands_end = cands_start
         for cand in example.cands:
             chunks.append([int(cand[0]-1e8-start_offset), int(cand[1]-1e8-start_offset)])
-            print(tokens[chunks[-1][0]:chunks[-1][1]+1])
+
             for cc in cand[2:]:
                 assert cc[0] >= ndelchunk
                 cands.append(tuple([cc[0]-ndelchunk, cands_end]))
