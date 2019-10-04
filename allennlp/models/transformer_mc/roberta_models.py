@@ -17,7 +17,9 @@ from allennlp.models.reading_comprehension.util import get_best_span
 from allennlp.nn import RegularizerApplicator, util
 from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1, F1Measure, FBetaMeasure
 from allennlp.modules.token_embedders import Embedding
+from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor
 
+from allennlp.nn.util import masked_log_softmax
 @Model.register("roberta_mc_qa")
 class RobertaMCQAModel(Model):
     """
@@ -473,6 +475,7 @@ class RobertaSpanReasoningModel(Model):
     """
     def __init__(self,
                  vocab: Vocabulary,
+                 #span_extractor: SpanExtractor,
                  pretrained_model: str = None,
                  requires_grad: bool = True,
                  transformer_weights_model: str = None,
@@ -505,16 +508,17 @@ class RobertaSpanReasoningModel(Model):
                             num_embeddings=vocab.get_vocab_size('edges'),
                             embedding_dim=transformer_config.hidden_size,
                             padding_index=0)
+        self.node_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
+        self.edge_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
 
-        self.qa_outputs = Linear(transformer_config.hidden_size, 2)
+        self.deep = 2
+        self.score_outputs = Linear(transformer_config.hidden_size, 1)
+        self.loss = torch.nn.NLLLoss()
 
         # Import GTP2 machinery to get from tokens to actual text
         self.byte_decoder = {v: k for k, v in bytes_to_unicode().items()}
 
-        self._span_start_accuracy = CategoricalAccuracy()
-        self._span_end_accuracy = CategoricalAccuracy()
-        self._span_accuracy = BooleanAccuracy()
-        self._squad_metrics = SquadEmAndF1()
+        self._accuracy = CategoricalAccuracy()
         self._debug = 0
         self._padding_value = 1  # The index of the RoBERTa padding token
 
@@ -530,7 +534,7 @@ class RobertaSpanReasoningModel(Model):
                 cands_end: torch.LongTensor = None,
                 metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
 
-        # print(f"chunks: {chunks}")
+        # print(f"chunks:{chunks[0]}")
         # print(f"sentence_graph: {sentence_graph[0][0]}")
         # print(f"corefs: {corefs[0][0]}")
         # print(f"cands: {cands}")
@@ -548,7 +552,7 @@ class RobertaSpanReasoningModel(Model):
         num_choices = input_ids.size(1)
 
         tokens_mask = (input_ids != self._padding_value).long()
-
+        
         # if self._debug > 0:
         #     print(f"batch_size = {batch_size}")
         #     print(f"num_choices = {num_choices}")
@@ -565,70 +569,90 @@ class RobertaSpanReasoningModel(Model):
                                                       # token_type_ids=segment_ids,
                                                       attention_mask=tokens_mask)
         sequence_output = transformer_outputs[0]
+        # print(sequence_output.size())
+        
+        chunk_mask = (chunks[:, :, 0] >= 0).squeeze(-1).long()
+        # print(chunks.size())
+        node_representations = self.node_span_extractor(sequence_output, chunks, tokens_mask, chunk_mask)
+        # print(node_representations.size())
 
-        logits = self.qa_outputs(sequence_output)
-        start_logits, end_logits = logits.split(1, dim=-1)
-        start_logits = start_logits.squeeze(-1)
-        end_logits = end_logits.squeeze(-1)
-        span_start_logits = util.replace_masked_values(start_logits, tokens_mask, -1e7)
-        span_end_logits = util.replace_masked_values(end_logits, tokens_mask, -1e7)
-        best_span = get_best_span(span_start_logits, span_end_logits)
-        span_start_probs = util.masked_softmax(span_start_logits, tokens_mask)
-        span_end_probs = util.masked_softmax(span_end_logits, tokens_mask)
-        output_dict = {"start_logits": start_logits, "end_logits": end_logits, "best_span": best_span}
-        output_dict["start_probs"] = span_start_probs
-        output_dict["end_probs"] = span_end_probs
+        sentence_graph_mask = (sentence_graph[:, :, :, 0] >= 0).squeeze(-1).long()
+        # print(sentence_graph.size())
+        sentence_graph_representations = self.node_span_extractor(sequence_output, sentence_graph, tokens_mask, sentence_graph_mask)
+        # print(sentence_graph_representations.size())
 
-        if start_positions is not None and end_positions is not None:
-            # If we are on multi-GPU, split add a dimension
-            if len(start_positions.size()) > 1:
-                start_positions = start_positions.squeeze(-1)
-            if len(end_positions.size()) > 1:
-                end_positions = end_positions.squeeze(-1)
-            # sometimes the start/end positions are outside our model inputs, we ignore these terms
-            ignored_index = start_logits.size(1)
-            start_positions.clamp_(0, ignored_index)
-            end_positions.clamp_(0, ignored_index)
+        corefs_representations = self.embedder(corefs)
+        # print(corefs_representations.size())
+        cands_representations = self.embedder(cands)
+        # print(cands_representations.size())
+       
+        # print(sentence_graph_representations[0][0])
+        # print(corefs_representations[0][0])
+        # print(cands_representations[0][0])
 
-            self._span_start_accuracy(span_start_logits, start_positions)
-            self._span_end_accuracy(span_end_logits, end_positions)
-            self._span_accuracy(best_span, torch.cat([start_positions.unsqueeze(-1), end_positions.unsqueeze(-1)], -1))
+        edge_representations = sentence_graph_representations + corefs_representations + cands_representations
 
-            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=ignored_index)
-            # Should we mask out invalid positions here?
-            start_loss = loss_fct(start_logits, start_positions)
-            end_loss = loss_fct(end_logits, end_positions)
-            total_loss = (start_loss + end_loss) / 2
-            output_dict["loss"] = total_loss
+        #print(node_representations.size()) # batch_size : node_from : dim
+        #print(edge_representations.size()) # batch_size : node_from : node_to : dim
 
-        # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
-        if metadata is not None:
-            output_dict['best_span_str'] = []
-            output_dict['exact_match'] = []
-            output_dict['f1_score'] = []
-            output_dict['qid'] = []
-            tokens_texts = []
-            for i in range(batch_size):
-                tokens_text = metadata[i]['tokens']
-                tokens_texts.append(tokens_text)
-                predicted_span = tuple(best_span[i].detach().cpu().numpy())
-                predicted_start = predicted_span[0]
-                predicted_end = predicted_span[1]
-                predicted_tokens = tokens_text[predicted_start:(predicted_end + 1)]
-                best_span_string = self.convert_tokens_to_string(predicted_tokens)
-                output_dict['best_span_str'].append(best_span_string)
-                answer_texts = metadata[i].get('answer_texts', [])
-                exact_match = 0
-                f1_score = 0
-                if answer_texts:
-                    exact_match, f1_score = self._squad_metrics(best_span_string, answer_texts)
-                output_dict['exact_match'].append(exact_match)
-                output_dict['f1_score'].append(f1_score)
-                output_dict['qid'].append(metadata[i]['id'])
-            output_dict['tokens_texts'] = tokens_texts
+        batch_size = node_representations.size(0)
+        node = node_representations.size(1)
+        dim = node_representations.size(2)
 
-        if self._debug > 0:
-            print(f"output_dict = {output_dict}")
+        node_representations = node_representations.transpose(1,2).unsqueeze(2) #batch_size : dim : 1 : node_from
+        edge_representations = edge_representations.transpose(2,3).transpose(1,2) #batch_size : dim : node_from : node_to
+
+        node_representations = node_representations.contiguous().view(batch_size*dim,1,node) # batch_size*dim : 1 : node_from
+        edge_representations = edge_representations.contiguous().view(batch_size*dim,node,node) # batch_size*dim : node_from : node_to
+
+        for deep in range(self.deep):
+            node_representations = node_representations.bmm(edge_representations)
+
+        node_representations = node_representations.view(batch_size, dim, 1, node).squeeze(2).transpose(1,2) #batch_size: node_from : dim
+
+        node_scores = self.score_outputs(node_representations).squeeze(-1) #batch_size : node_from
+
+
+        masks = chunk_mask
+        for i in range(cands_start.size(0)):
+            masks[i][:cands_start[i]] = 0
+
+        node_log_probs = masked_log_softmax(node_scores, masks)
+
+        output_dict = {}
+        output_dict["loss"] = self.loss(node_log_probs, cands_start)
+
+        self._accuracy(node_log_probs, cands_start)
+
+        output_dict['best'] = node_log_probs.argmax(-1)
+        # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
+        # if metadata is not None:
+        #     output_dict['best_span_str'] = []
+        #     output_dict['exact_match'] = []
+        #     output_dict['f1_score'] = []
+        #     output_dict['qid'] = []
+        #     tokens_texts = []
+        #     for i in range(batch_size):
+        #         tokens_text = metadata[i]['tokens']
+        #         tokens_texts.append(tokens_text)
+        #         predicted_span = tuple(best_span[i].detach().cpu().numpy())
+        #         predicted_start = predicted_span[0]
+        #         predicted_end = predicted_span[1]
+        #         predicted_tokens = tokens_text[predicted_start:(predicted_end + 1)]
+        #         best_span_string = self.convert_tokens_to_string(predicted_tokens)
+        #         output_dict['best_span_str'].append(best_span_string)
+        #         answer_texts = metadata[i].get('answer_texts', [])
+        #         exact_match = 0
+        #         f1_score = 0
+        #         if answer_texts:
+        #             exact_match, f1_score = self._squad_metrics(best_span_string, answer_texts)
+        #         output_dict['exact_match'].append(exact_match)
+        #         output_dict['f1_score'].append(f1_score)
+        #         output_dict['qid'].append(metadata[i]['id'])
+        #     output_dict['tokens_texts'] = tokens_texts
+
+        # if self._debug > 0:
+        #     print(f"output_dict = {output_dict}")
 
         return output_dict
 
@@ -639,13 +663,8 @@ class RobertaSpanReasoningModel(Model):
         return text
 
     def get_metrics(self, reset: bool = False) -> Dict[str, float]:
-        exact_match, f1_score = self._squad_metrics.get_metric(reset)
         return {
-            'start_acc': self._span_start_accuracy.get_metric(reset),
-            'end_acc': self._span_end_accuracy.get_metric(reset),
-            'span_acc': self._span_accuracy.get_metric(reset),
-            'em': exact_match,
-            'f1': f1_score,
+            'acc': self._accuracy.get_metric(reset)
         }
 
     @classmethod

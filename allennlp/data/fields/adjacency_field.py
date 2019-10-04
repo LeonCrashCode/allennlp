@@ -48,6 +48,7 @@ class AdjacencyField(Field[torch.Tensor]):
     def __init__(self,
                  indices: List[Tuple[int, int]],
                  sequence_field: SequenceField,
+                 edges: List[Tuple[int, int]] = None,
                  labels: List[str] = None,
                  label_namespace: str = 'labels',
                  undirected: bool = False,
@@ -55,6 +56,7 @@ class AdjacencyField(Field[torch.Tensor]):
                  padding_value: int = -1) -> None:
         self.indices = indices
         self.labels = labels
+        self.edges = edges
         self.sequence_field = sequence_field
         self._label_namespace = label_namespace
         self._padding_value = padding_value
@@ -70,6 +72,8 @@ class AdjacencyField(Field[torch.Tensor]):
                 self.indices.append(self.indices[i][::-1])
                 if labels:
                     self.labels.append(labels[i])
+                if edges:
+                    self.edges.append(edges[i])
                 i += 1
 
         if len(set(indices)) != len(indices):
@@ -82,6 +86,9 @@ class AdjacencyField(Field[torch.Tensor]):
         if labels is not None and len(indices) != len(labels):
             raise ConfigurationError(f"Labelled indices were passed, but their lengths do not match: "
                                      f" {labels}, {indices}")
+        if edges is not None and len(edges) != len(indices):
+            raise ConfigurationError("edges were passed, but their lengths do not match: "
+                                     f" {edges}, {indices}")
 
     def _maybe_warn_for_namespace(self, label_namespace: str) -> None:
         if not (self._label_namespace.endswith("labels") or self._label_namespace.endswith("tags")):
@@ -112,12 +119,19 @@ class AdjacencyField(Field[torch.Tensor]):
     @overrides
     def as_tensor(self, padding_lengths: Dict[str, int]) -> torch.Tensor:
         desired_num_tokens = padding_lengths['num_tokens']
-        tensor = torch.ones(desired_num_tokens, desired_num_tokens, dtype=self._dtype) * self._padding_value
-        labels = self._indexed_labels or [1 for _  in range(len(self.indices))]
+        if not self.edges:
+            tensor = torch.ones(desired_num_tokens, desired_num_tokens, dtype=self._dtype) * self._padding_value
+            labels = self._indexed_labels or [1 for _  in range(len(self.indices))]
 
-        for index, label in zip(self.indices, labels):
-            tensor[index] = label
-        return tensor
+            for index, label in zip(self.indices, labels):
+                tensor[index] = label
+            return tensor
+        else:
+            edges = torch.tensor(self.edges, dtype = torch.long)
+            tensor = torch.ones(desired_num_tokens, desired_num_tokens, 2, dtype=torch.long) * self._padding_value
+            for index, edge in zip(self.indices, edges):
+                tensor[index] = edge
+            return tensor
 
     @overrides
     def empty_field(self) -> 'AdjacencyField':

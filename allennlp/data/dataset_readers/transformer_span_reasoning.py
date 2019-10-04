@@ -155,7 +155,7 @@ class TransformerSpanReasoningReader(DatasetReader):
         fields['segment_ids'] = segment_ids_field
 
         chunks_field = ListField([SpanField(chunk[0], chunk[1], tokens_field) for chunk in features.chunks])
-        sentence_graph_field = AdjacencyField(features.sentence_graph, chunks_field, padding_value=0, dtype=torch.long, undirected=True)
+        sentence_graph_field = AdjacencyField(features.sentence_graph, chunks_field, edges=features.sentence_graph_edges, padding_value=-1, dtype=torch.long, undirected=True)
         corefs_field = AdjacencyField(features.corefs, chunks_field, dtype=torch.long, undirected=True, labels=features.corefs_label, padding_value=0, label_namespace="edges")
         cands_field = AdjacencyField(features.cands, chunks_field, dtype=torch.long, labels=features.cands_label, padding_value=0, label_namespace="edges")
 
@@ -268,7 +268,7 @@ class TransformerSpanReasoningReader(DatasetReader):
 
                     cands = qa["candidates"]
                     for j in range(len(cands)):
-                        cands[j] = [[int(x.strip().split()[0]), x.strip().split()[1]] for x in cands[j][2].split("|||")]
+                        cands[j] = [cands[j]["roberta_start"], cands[j]["roberta_end"]] + [[int(x.strip().split()[0]), x.strip().split()[1]] for x in cands[j]["related"].split("|||")] # [start, end, [chunkid, label]*n]
 
                     corefs = [ [int(x.strip().split()[0]), int(x.strip().split()[1])] for x in qa["corefs"].split("|||")]
                     sentence_graph = []
@@ -278,6 +278,7 @@ class TransformerSpanReasoningReader(DatasetReader):
                         y = int(sentence_chunk_offsets[j+1])
                         sentence_graph += self._generate_completed_graph(x, y)
                     sentence_graph.sort()
+
 
                     example = SpanPredictionExample(
                         qas_id=qas_id,
@@ -523,17 +524,25 @@ class TransformerSpanReasoningReader(DatasetReader):
         cands_start = len(chunks)
         cands_end = cands_start
         for cand in example.cands:
-            for cc in cand:
+            chunks.append([int(cand[0]-1e8-start_offset), int(cand[1]-1e8-start_offset)])
+            print(tokens[chunks[-1][0]:chunks[-1][1]+1])
+            for cc in cand[2:]:
+                assert cc[0] >= ndelchunk
                 cands.append(tuple([cc[0]-ndelchunk, cands_end]))
                 cands_label.append(cc[1])
             cands_end += 1
             #add candidate chunks default [0, 0], make sense?
-            chunks.append([0, 0])
+            
 
         #setence graph
         sentence_graph = []
         for sent in example.sentence_graph:
             sentence_graph.append(tuple(sent))
+
+        #create edge spans
+        sentence_graph_edges = []
+        for item in sentence_graph:
+            sentence_graph_edges.append(tuple([chunks[item[0]][1] + 1, chunks[item[1]][0] - 1]))
 
 
         if debug > 0:
@@ -556,6 +565,7 @@ class TransformerSpanReasoningReader(DatasetReader):
                     cls_index=cls_index,
                     chunks=chunks,
                     sentence_graph=sentence_graph,
+                    sentence_graph_edges=sentence_graph_edges,
                     corefs=corefs,
                     corefs_label=corefs_label,
                     cands=cands,
@@ -649,6 +659,7 @@ class InputFeatures(object):
                 cls_index,
                 chunks,
                 sentence_graph,
+                sentence_graph_edges,
                 corefs,
                 corefs_label,
                 cands,
@@ -677,6 +688,7 @@ class InputFeatures(object):
         self.cls_index = cls_index
         self.chunks = chunks
         self.sentence_graph=sentence_graph
+        self.sentence_graph_edges = sentence_graph_edges
         self.corefs = corefs
         self.corefs_label = corefs_label
         self.cands = cands
