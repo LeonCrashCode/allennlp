@@ -406,6 +406,7 @@ class TransformerSpanReasoningReader(DatasetReader):
 
 
         # print(orig_to_tok_index)
+        # print(len(orig_to_tok_index))
         # print(f"before example.doc_chunks : {example.doc_chunks}")
         for chunk in example.doc_chunks:
             s, e = chunk
@@ -415,12 +416,11 @@ class TransformerSpanReasoningReader(DatasetReader):
         # print(f"example.doc_chunks : {example.doc_chunks}")
         # print(len(all_doc_tokens))
 
-        # print(q_orig_to_tok_index)
         # print(f"before example.q_chunks : {example.q_chunks}")
         for chunk in example.q_chunks:
             s, e = chunk
             chunk[0] = q_orig_to_tok_index[s - len(orig_to_tok_index)] + len(all_doc_tokens)
-            chunk[1] = q_orig_to_tok_index[e + 1 - len(orig_to_tok_index)] - 1 + len(all_doc_tokens) if  e + 1 - len(orig_to_tok_index) < len(q_tok_to_orig_index) else len(all_doc_tokens) + len(all_query_tokens) - 1
+            chunk[1] = q_orig_to_tok_index[e + 1 - len(orig_to_tok_index)] - 1 + len(all_doc_tokens) if  e + 1 - len(orig_to_tok_index) < len(q_orig_to_tok_index) else len(all_doc_tokens) + len(all_query_tokens) - 1
 
         # print(f"example.q_chunks : {example.q_chunks}")
         if len(all_query_tokens) > self._max_pieces:
