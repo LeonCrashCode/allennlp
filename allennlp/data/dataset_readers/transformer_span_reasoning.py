@@ -268,7 +268,7 @@ class TransformerSpanReasoningReader(DatasetReader):
 
                     cands = qa["candidates"]
                     for j in range(len(cands)):
-                        cands[j] = [cands[j]["roberta_start"], cands[j]["roberta_end"]] + [[int(x.strip().split()[0]), x.strip().split()[1]] for x in cands[j]["related"].split("|||")] # [start, end, [chunkid, label]*n]
+                        cands[j] = [cands[j]["roberta_start"], cands[j]["roberta_end"], cands[j]["stride_index"]] + [[int(x.strip().split()[0]), x.strip().split()[1]] for x in cands[j]["related"].split("|||")] # [start, end, [chunkid, label]*n]
 
                     corefs = [ [int(x.strip().split()[0]), int(x.strip().split()[1])] for x in qa["corefs"].split("|||")]
                     sentence_graph = []
@@ -397,31 +397,63 @@ class TransformerSpanReasoningReader(DatasetReader):
                 q_tok_to_orig_index.append(i)
                 all_query_tokens.append(sub_token)
 
+        # print(len(all_doc_tokens))
+        # print(all_doc_tokens)
+        # print(all_doc_tokens[450:])
+        # print(len(all_query_tokens))
+        # print(all_query_tokens)
+
+
+
+        # print(orig_to_tok_index)
+        # print(f"before example.doc_chunks : {example.doc_chunks}")
         for chunk in example.doc_chunks:
             s, e = chunk
             chunk[0] = orig_to_tok_index[s]
             chunk[1] = orig_to_tok_index[e + 1] - 1 if e + 1 < len(orig_to_tok_index) else len(all_doc_tokens) - 1
 
+        # print(f"example.doc_chunks : {example.doc_chunks}")
+        # print(len(all_doc_tokens))
+
+        # print(q_orig_to_tok_index)
+        # print(f"before example.q_chunks : {example.q_chunks}")
         for chunk in example.q_chunks:
             s, e = chunk
             chunk[0] = q_orig_to_tok_index[s - len(orig_to_tok_index)] + len(all_doc_tokens)
             chunk[1] = q_orig_to_tok_index[e + 1 - len(orig_to_tok_index)] - 1 + len(all_doc_tokens) if  e + 1 - len(orig_to_tok_index) < len(q_tok_to_orig_index) else len(all_doc_tokens) + len(all_query_tokens) - 1
 
-
+        # print(f"example.q_chunks : {example.q_chunks}")
         if len(all_query_tokens) > self._max_pieces:
             assert False, "not allowed"
             # all_query_tokens = all_query_tokens[0:self._max_pieces]
 
+        tokens = all_doc_tokens + all_query_tokens
         # The -3 accounts for [CLS], [SEP] and [SEP]
+
+        # print(f"max_pieces : {self._max_pieces}")
         max_tokens_for_doc = self._max_pieces - len(all_query_tokens) - 3
+
+        # here we need to recover the spans true index of candidates
+        _DocSpan = collections.namedtuple(  # pylint: disable=invalid-name
+            "DocSpan", ["start", "length"])
+        doc_spans = []
+        start_offset = 0
+        while start_offset < len(all_doc_tokens):
+            length = len(all_doc_tokens) - start_offset
+            if length > max_tokens_for_doc:
+                length = max_tokens_for_doc
+            doc_spans.append(_DocSpan(start=start_offset, length=length))
+            if start_offset + length == len(all_doc_tokens):
+                break
+            start_offset += min(length, self._doc_stride)
+
 
 
         start_offset = 0
         if len(all_doc_tokens) > max_tokens_for_doc:
+            start_offset = len(all_doc_tokens) - max_tokens_for_doc
             all_doc_tokens = all_doc_tokens[-max_tokens_for_doc:]
-            start_offset = tok_to_orig_index[-max_tokens_for_doc]
-
-
+            
         ndelchunk = 0
         for chunk in example.doc_chunks:
             if chunk[0] >= start_offset:
@@ -457,6 +489,9 @@ class TransformerSpanReasoningReader(DatasetReader):
                     edges.append(edge)
             example.sentence_graph = edges
 
+
+        # print(f"window example.doc_chunks : {example.doc_chunks}")
+        # print(f"window example.q_chunks : {example.q_chunks}")
 
         # We can have documents that are longer than the maximum sequence length.
         # # To deal with this we do a sliding window approach, where we take chunks
@@ -524,9 +559,14 @@ class TransformerSpanReasoningReader(DatasetReader):
         cands_start = len(chunks)
         cands_end = cands_start
         for cand in example.cands:
-            chunks.append([int(cand[0]-1e8-start_offset), int(cand[1]-1e8-start_offset)])
+            stride_offset = doc_spans[cand[2]].start
+            s = int(cand[0]-1e8) + stride_offset - start_offset
+            e = int(cand[1]-1e8) + stride_offset - start_offset
 
-            for cc in cand[2:]:
+            chunks.append([s,e])
+            # print(stride_offset)
+            # print(chunks[-1])
+            for cc in cand[3:]:
                 assert cc[0] >= ndelchunk
                 cands.append(tuple([cc[0]-ndelchunk, cands_end]))
                 cands_label.append(cc[1])
@@ -544,7 +584,14 @@ class TransformerSpanReasoningReader(DatasetReader):
         for item in sentence_graph:
             sentence_graph_edges.append(tuple([chunks[item[0]][1] + 1, chunks[item[1]][0] - 1]))
 
+        # for chunk in example.doc_chunks:
+        #     print(tokens[chunk[0]:chunk[1]+1])
+        # for chunk in example.q_chunks:
+        #     print(tokens[chunk[0]:chunk[1]+1])
+        # for i, cand in enumerate(example.cands):
+        #     print(tokens[chunks[-i-1][0]:chunks[-i-1][1]+1])
 
+        # exit()
         if debug > 0:
             logger.info("*** Features ***")
             logger.info(f"unique_id: {example.qas_id}")
