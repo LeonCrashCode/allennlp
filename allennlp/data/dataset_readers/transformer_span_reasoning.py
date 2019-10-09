@@ -14,7 +14,7 @@ from allennlp.common.file_utils import cached_path
 from allennlp.common.tqdm import Tqdm
 from allennlp.common.util import JsonDict
 from allennlp.data.dataset_readers.dataset_reader import DatasetReader
-from allennlp.data.fields import Field, TextField, LabelField, SpanField, AdjacencyField, ListField
+from allennlp.data.fields import Field, TextField, LabelField, SpanField, AdjacencyField, ListField, IndexField
 from allennlp.data.fields import MetadataField, SequenceLabelField
 from allennlp.data.instance import Instance
 from allennlp.data.token_indexers import PretrainedTransformerIndexer, SingleIdTokenIndexer
@@ -58,7 +58,7 @@ class TransformerSpanReasoningReader(DatasetReader):
         self._tokenizer_internal = self._tokenizer._tokenizer
         token_indexer = PretrainedTransformerIndexer(pretrained_model, do_lowercase=do_lowercase)
         self._token_indexers = {'tokens': token_indexer}
-        self._edge_indexers = {'tokens': SingleIdTokenIndexer()}
+        self._edge_indexers = {'edges': SingleIdTokenIndexer(namespace="edges")}
 
         self._max_pieces = max_pieces
         self._sample = sample
@@ -155,14 +155,20 @@ class TransformerSpanReasoningReader(DatasetReader):
         fields['segment_ids'] = segment_ids_field
 
         chunks_field = ListField([SpanField(chunk[0], chunk[1], tokens_field) for chunk in features.chunks])
-        sentence_graph_field = AdjacencyField(features.sentence_graph, chunks_field, edges=features.sentence_graph_edges, padding_value=-1, dtype=torch.long, undirected=True)
-        corefs_field = AdjacencyField(features.corefs, chunks_field, dtype=torch.long, undirected=True, labels=features.corefs_label, padding_value=0, label_namespace="edges")
-        cands_field = AdjacencyField(features.cands, chunks_field, dtype=torch.long, labels=features.cands_label, padding_value=0, label_namespace="edges")
+        sentence_graph_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.sentence_graph_nodes])
+        sentence_graph_edges_field = ListField([ListField([SpanField(n[0], n[1], tokens_field) for n in nodes]) for nodes in features.sentence_graph_edges])
+        paragraph_coref_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.paragraph_coref_nodes])
+        paragraph_coref_edges_field = ListField([TextField([ Token(edge) for edge in edges], self._edge_indexers) for edges in features.paragraph_coref_edges])
+        candidate_graph_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.candidate_graph_nodes])
+        candidate_graph_edges_field = ListField([TextField([ Token(edge) for edge in edges], self._edge_indexers) for edges in features.candidate_graph_edges])
 
         fields['chunks'] = chunks_field
-        fields['sentence_graph'] = sentence_graph_field
-        fields['corefs'] = corefs_field
-        fields['cands'] = cands_field
+        fields['sentence_graph_nodes'] = sentence_graph_nodes_field
+        fields['sentence_graph_edges'] = sentence_graph_edges_field
+        fields['paragraph_coref_nodes'] = paragraph_coref_nodes_field
+        fields['paragraph_coref_edges'] = paragraph_coref_edges_field
+        fields['candidate_graph_nodes'] = candidate_graph_nodes_field
+        fields['candidate_graph_edges'] = candidate_graph_edges_field
 
         fields['cands_start'] = LabelField(features.cands_start, skip_indexing=True)
         fields['cands_end'] = LabelField(features.cands_end, skip_indexing=True)
@@ -173,11 +179,12 @@ class TransformerSpanReasoningReader(DatasetReader):
             logger.info(f"tokens = {features.tokens}")
             logger.info(f"segment_ids = {features.segment_ids}")
             logger.info(f"chunks = {features.chunks}")
-            logger.info(f"sentence_graph = {features.sentence_graph}")
-            logger.info(f"corefs = {features.corefs}")
-            logger.info(f"corefs_label = {features.corefs_label}")
-            logger.info(f"cands = {features.cands}")
-            logger.info(f"cands_label = {features.cands_label}")
+            logger.info(f"sentence_graph_nodes = {features.sentence_graph_nodes}")
+            logger.info(f"sentence_graph_edges = {features.sentence_graph_edges}")
+            logger.info(f"paragraph_coref_nodes = {features.paragraph_coref_nodes}")
+            logger.info(f"paragraph_coref_edges = {features.paragraph_coref_edges}")
+            logger.info(f"candidate_graph_nodes = {features.candidate_graph_nodes}")
+            logger.info(f"candidate_graph_edges = {features.candidate_graph_edges}")
 
         fields["metadata"] = MetadataField(metadata)
         return Instance(fields)
@@ -541,10 +548,10 @@ class TransformerSpanReasoningReader(DatasetReader):
                 chunk[1] += 1
 
         # corefs
-        corefs = []
-        for coref in example.corefs:
-            corefs.append(tuple(coref))
-        corefs_label = ["coref"] * len(example.corefs)
+        # corefs = []
+        # for coref in example.corefs:
+        #     corefs.append(tuple(coref))
+        # corefs_label = ["coref"] * len(example.corefs)
 
         # chunks
         chunks = []
@@ -575,14 +582,48 @@ class TransformerSpanReasoningReader(DatasetReader):
             
 
         #setence graph
-        sentence_graph = []
-        for sent in example.sentence_graph:
-            sentence_graph.append(tuple(sent))
+        sentence_graph_nodes = [ [] for _ in range(len(chunks))]
+        sentence_graph_edges = [ [] for _ in range(len(chunks))]
+        for item in example.sentence_graph:
+            sentence_graph_nodes[item[0]].append(item[1])
+            sentence_graph_nodes[item[1]].append(item[0])
+            sentence_graph_edges[item[0]].append(tuple([chunks[item[0]][1] + 1, chunks[item[1]][0] - 1]))
+            sentence_graph_edges[item[1]].append(tuple([chunks[item[0]][1] + 1, chunks[item[1]][0] - 1]))
+        for item in sentence_graph_nodes:
+            if len(item) == 0:
+                item.append(-1)
+        for item in sentence_graph_edges:
+            if len(item) == 0:
+                item.append(tuple([-1, -1]))
 
-        #create edge spans
-        sentence_graph_edges = []
-        for item in sentence_graph:
-            sentence_graph_edges.append(tuple([chunks[item[0]][1] + 1, chunks[item[1]][0] - 1]))
+        #coref graph
+        paragraph_coref_nodes = [ [] for _ in range(len(chunks))]
+        paragraph_coref_edges = [ [] for _ in range(len(chunks))]
+        for item in example.corefs:
+            paragraph_coref_nodes[item[0]].append(item[1])
+            paragraph_coref_nodes[item[1]].append(item[0])
+            paragraph_coref_edges[item[0]].append("coref")
+            paragraph_coref_edges[item[1]].append("coref")
+        for item in paragraph_coref_nodes:
+            if len(item) == 0:
+                item.append(-1)
+        for item in paragraph_coref_edges:
+            if len(item) == 0:
+                item.append("NONE")
+
+        #candidates graph
+        candidate_graph_nodes = [ [] for _ in range(len(chunks))]
+        candidate_graph_edges = [ [] for _ in range(len(chunks))]
+
+        for item, label in zip(cands, cands_label): 
+            candidate_graph_nodes[item[0]].append(item[1])
+            candidate_graph_edges[item[0]].append(label)
+        for item in candidate_graph_nodes:
+            if len(item) == 0:
+                item.append(-1)
+        for item in candidate_graph_edges:
+            if len(item) == 0:
+                item.append("NONE")
 
         # for chunk in example.doc_chunks:
         #     print(tokens[chunk[0]:chunk[1]+1])
@@ -598,10 +639,12 @@ class TransformerSpanReasoningReader(DatasetReader):
             logger.info(f"tokens: {tokens}")
             logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
             logger.info(f"chunks: {chunks}" )
-            logger.info(f"corefs: {corefs}" )
-            logger.info(f"corefs_label: {corefs_label}" )
-            logger.info(f"cands: {cands}" )
-            logger.info(f"cands_label: {cands_label}" )
+            logger.info(f"sentence_graph_nodes: {sentence_graph_nodes}" )
+            logger.info(f"sentence_graph_edges: {sentence_graph_edges}" )
+            logger.info(f"paragraph_coref_nodes: {paragraph_coref_nodes}" )
+            logger.info(f"paragraph_coref_edges: {paragraph_coref_edges}" )
+            logger.info(f"candidate_graph_nodes: {candidate_graph_nodes}" )
+            logger.info(f"candidate_graph_edges: {candidate_graph_edges}" )
             logger.info(f"cands_start: {cands_start}" )
             logger.info(f"cands_end: {cands_end}" )
 
@@ -611,12 +654,12 @@ class TransformerSpanReasoningReader(DatasetReader):
                     segment_ids=segment_ids,
                     cls_index=cls_index,
                     chunks=chunks,
-                    sentence_graph=sentence_graph,
+                    sentence_graph_nodes=sentence_graph_nodes,
                     sentence_graph_edges=sentence_graph_edges,
-                    corefs=corefs,
-                    corefs_label=corefs_label,
-                    cands=cands,
-                    cands_label=cands_label,
+                    paragraph_coref_nodes=paragraph_coref_nodes,
+                    paragraph_coref_edges=paragraph_coref_edges,
+                    candidate_graph_nodes=candidate_graph_nodes,
+                    candidate_graph_edges=candidate_graph_edges,
                     cands_start=cands_start,
                     cands_end=cands_end,
                     )
@@ -705,12 +748,12 @@ class InputFeatures(object):
                 segment_ids,
                 cls_index,
                 chunks,
-                sentence_graph,
+                sentence_graph_nodes,
                 sentence_graph_edges,
-                corefs,
-                corefs_label,
-                cands,
-                cands_label,
+                paragraph_coref_nodes,
+                paragraph_coref_edges,
+                candidate_graph_nodes,
+                candidate_graph_edges,
                 cands_start,
                 cands_end):
     # def __init__(self,
@@ -734,12 +777,12 @@ class InputFeatures(object):
         self.segment_ids = segment_ids
         self.cls_index = cls_index
         self.chunks = chunks
-        self.sentence_graph=sentence_graph
+        self.sentence_graph_nodes=sentence_graph_nodes
         self.sentence_graph_edges = sentence_graph_edges
-        self.corefs = corefs
-        self.corefs_label = corefs_label
-        self.cands = cands
-        self.cands_label = cands_label
+        self.paragraph_coref_nodes = paragraph_coref_nodes
+        self.paragraph_coref_edges = paragraph_coref_edges
+        self.candidate_graph_nodes = candidate_graph_nodes
+        self.candidate_graph_edges = candidate_graph_edges
         self.cands_start = cands_start
         self.cands_end = cands_end
 

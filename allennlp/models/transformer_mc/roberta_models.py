@@ -7,7 +7,7 @@ from pytorch_transformers.tokenization_gpt2 import bytes_to_unicode
 import re
 import torch
 from torch.nn.modules.linear import Linear
-from torch.nn.functional import binary_cross_entropy_with_logits
+from torch.nn.functional import binary_cross_entropy_with_logits,log_softmax
 
 from allennlp.common.params import Params
 from allennlp.data import Vocabulary
@@ -19,7 +19,7 @@ from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, Squa
 from allennlp.modules.token_embedders import Embedding
 from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor
 
-from allennlp.nn.util import masked_log_softmax
+from allennlp.nn.util import batched_index_select
 @Model.register("roberta_mc_qa")
 class RobertaMCQAModel(Model):
     """
@@ -526,10 +526,13 @@ class RobertaSpanReasoningModel(Model):
     def forward(self,
                 tokens: Dict[str, torch.LongTensor],
                 segment_ids: torch.LongTensor = None,
-                sentence_graph: torch.LongTensor = None,
                 chunks: torch.LongTensor = None,
-                corefs: torch.LongTensor = None,
-                cands: torch.LongTensor = None,
+                sentence_graph_nodes: torch.LongTensor = None,
+                sentence_graph_edges: torch.LongTensor = None,
+                paragraph_coref_nodes: torch.LongTensor = None,
+                paragraph_coref_edges: torch.LongTensor = None,
+                candidate_graph_nodes: torch.LongTensor = None,
+                candidate_graph_edges: torch.LongTensor = None,
                 cands_start: torch.LongTensor = None,
                 cands_end: torch.LongTensor = None,
                 metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
@@ -569,55 +572,75 @@ class RobertaSpanReasoningModel(Model):
                                                       # token_type_ids=segment_ids,
                                                       attention_mask=tokens_mask)
         sequence_output = transformer_outputs[0]
-        # print(sequence_output.size())
-        
+
         chunk_mask = (chunks[:, :, 0] >= 0).squeeze(-1).long()
-        # print(chunks.size())
         node_representations = self.node_span_extractor(sequence_output, chunks, tokens_mask, chunk_mask)
-        # print(node_representations.size())
+        
 
-        sentence_graph_mask = (sentence_graph[:, :, :, 0] >= 0).squeeze(-1).long()
-        # print(sentence_graph.size())
-        sentence_graph_representations = self.node_span_extractor(sequence_output, sentence_graph, tokens_mask, sentence_graph_mask)
-        # print(sentence_graph_representations.size())
+        #In order to masked index selected, add a zero node into the head of sequence of nodes
+        #
+        zeros = torch.zeros(node_representations.size(0), 1, node_representations.size(2))
+        node_representations = torch.cat((zeros, node_representations), dim=1)
+        # print("node_representations", node_representations.size())
+        #the nodes increase by 1
+        sentence_graph_nodes += 1
+        paragraph_coref_nodes += 1
+        candidate_graph_nodes += 1
+        cands_start += 1
+        cands_end += 1
 
-        corefs_representations = self.embedder(corefs)
-        # print(corefs_representations.size())
-        cands_representations = self.embedder(cands)
-        # print(cands_representations.size())
-       
-        # print(sentence_graph_representations[0][0])
-        # print(corefs_representations[0][0])
-        # print(cands_representations[0][0])
+        if sentence_graph_edges.size(-2) == 1:
+            mask = (sentence_graph_edges[:, :, :, 0] >= 0).long()
+        else:
+            mask = (sentence_graph_edges[:, :, :, 0] >= 0).squeeze(-1).long()
+        sentence_graph_adjacent_edge_representations = self.edge_span_extractor(sequence_output, sentence_graph_edges, tokens_mask, mask)
+        # print("sentence_graph_adjacent_edge_representations", sentence_graph_adjacent_edge_representations.size())
 
-        edge_representations = sentence_graph_representations + corefs_representations + cands_representations
+        paragraph_coref_adjacent_edge_representations = self.embedder(paragraph_coref_edges["edges"])
+        # print("paragraph_coref_adjacent_edge_representations", paragraph_coref_adjacent_edge_representations.size())
 
-        #print(node_representations.size()) # batch_size : node_from : dim
-        #print(edge_representations.size()) # batch_size : node_from : node_to : dim
+        candidate_graph_adjacent_edge_representations = self.embedder(candidate_graph_edges["edges"])
+        # print("candidate_graph_adjacent_edge_representations", candidate_graph_adjacent_edge_representations.size())
 
-        batch_size = node_representations.size(0)
-        node = node_representations.size(1)
-        dim = node_representations.size(2)
-
-        node_representations = node_representations.transpose(1,2).unsqueeze(2) #batch_size : dim : 1 : node_from
-        edge_representations = edge_representations.transpose(2,3).transpose(1,2) #batch_size : dim : node_from : node_to
-
-        node_representations = node_representations.contiguous().view(batch_size*dim,1,node) # batch_size*dim : 1 : node_from
-        edge_representations = edge_representations.contiguous().view(batch_size*dim,node,node) # batch_size*dim : node_from : node_to
 
         for deep in range(self.deep):
-            node_representations = node_representations.bmm(edge_representations)
+            # print(node_representations[0][0])
 
-        node_representations = node_representations.view(batch_size, dim, 1, node).squeeze(2).transpose(1,2) #batch_size: node_from : dim
+            sentence_graph_adjacent_node_representations = batched_index_select(node_representations, sentence_graph_nodes.squeeze(-1))
+            print("sentence_graph_adjacent_node_representations", sentence_graph_adjacent_node_representations.size())
 
+            paragraph_coref_adjacent_node_representations = batched_index_select(node_representations, paragraph_coref_nodes.squeeze(-1))
+            print("paragraph_coref_adjacent_node_representations", paragraph_coref_adjacent_node_representations.size())
+
+            candidate_graph_adjacent_node_representations = batched_index_select(node_representations, candidate_graph_nodes.squeeze(-1))
+            print("candidate_graph_adjacent_node_representations", candidate_graph_adjacent_node_representations.size())
+
+
+            transition_score = torch.cat((sentence_graph_adjacent_node_representations * sentence_graph_adjacent_edge_representations 
+                                , paragraph_coref_adjacent_node_representations * paragraph_coref_adjacent_edge_representations
+                                , candidate_graph_adjacent_node_representations * candidate_graph_adjacent_edge_representations), dim=2)
+
+            transition_score = torch.mean(transition_score,dim=2)
+
+            zeros = torch.zeros(transition_score.size(0), 1, transition_score.size(2))
+            transition_score = torch.cat((zeros, transition_score), dim=1)
+        
+            node_representations += transition_score
+
+            
         node_scores = self.score_outputs(node_representations).squeeze(-1) #batch_size : node_from
 
 
         masks = chunk_mask
+        zeros = torch.zeros(masks.size(0), 1).long()
+        masks = torch.cat((zeros, masks), dim=-1)
+
         for i in range(cands_start.size(0)):
             masks[i][:cands_start[i]] = 0
 
-        node_log_probs = masked_log_softmax(node_scores, masks)
+        node_scores -= (masks == 0).float() * 1e10
+        
+        node_log_probs = log_softmax(node_scores)
 
         output_dict = {}
         output_dict["loss"] = self.loss(node_log_probs, cands_start)
@@ -625,6 +648,8 @@ class RobertaSpanReasoningModel(Model):
         self._accuracy(node_log_probs, cands_start)
 
         output_dict['best'] = node_log_probs.argmax(-1)
+
+        exit(-1)
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []
