@@ -511,6 +511,9 @@ class RobertaSpanReasoningModel(Model):
         self.node_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
         self.edge_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
 
+        self.dummy_node = torch.zeros(1,transformer_config.hidden_size)
+        self.dummy_mask = torch.zeros(1)
+
         self.deep = 2
         self.score_outputs = Linear(transformer_config.hidden_size, 1)
         self.loss = torch.nn.NLLLoss()
@@ -521,6 +524,7 @@ class RobertaSpanReasoningModel(Model):
         self._accuracy = CategoricalAccuracy()
         self._debug = 0
         self._padding_value = 1  # The index of the RoBERTa padding token
+
 
 
     def forward(self,
@@ -579,7 +583,7 @@ class RobertaSpanReasoningModel(Model):
 
         #In order to masked index selected, add a zero node into the head of sequence of nodes
         #
-        zeros = torch.zeros(node_representations.size(0), 1, node_representations.size(2))
+        zeros = self.dummy_node.expand(node_representations.size(0), self.dummy_node.size(0), self.dummy_node.size(1))
         node_representations = torch.cat((zeros, node_representations), dim=1)
         # print("node_representations", node_representations.size())
         #the nodes increase by 1
@@ -607,13 +611,13 @@ class RobertaSpanReasoningModel(Model):
             # print(node_representations[0][0])
 
             sentence_graph_adjacent_node_representations = batched_index_select(node_representations, sentence_graph_nodes.squeeze(-1))
-            print("sentence_graph_adjacent_node_representations", sentence_graph_adjacent_node_representations.size())
+            # print("sentence_graph_adjacent_node_representations", sentence_graph_adjacent_node_representations.size())
 
             paragraph_coref_adjacent_node_representations = batched_index_select(node_representations, paragraph_coref_nodes.squeeze(-1))
-            print("paragraph_coref_adjacent_node_representations", paragraph_coref_adjacent_node_representations.size())
+            # print("paragraph_coref_adjacent_node_representations", paragraph_coref_adjacent_node_representations.size())
 
             candidate_graph_adjacent_node_representations = batched_index_select(node_representations, candidate_graph_nodes.squeeze(-1))
-            print("candidate_graph_adjacent_node_representations", candidate_graph_adjacent_node_representations.size())
+            # print("candidate_graph_adjacent_node_representations", candidate_graph_adjacent_node_representations.size())
 
 
             transition_score = torch.cat((sentence_graph_adjacent_node_representations * sentence_graph_adjacent_edge_representations 
@@ -632,14 +636,14 @@ class RobertaSpanReasoningModel(Model):
 
 
         masks = chunk_mask
-        zeros = torch.zeros(masks.size(0), 1).long()
+        zeros = self.dummy_mask.expand(masks.size(0), 1).long()
         masks = torch.cat((zeros, masks), dim=-1)
 
         for i in range(cands_start.size(0)):
             masks[i][:cands_start[i]] = 0
 
         node_scores -= (masks == 0).float() * 1e10
-        
+
         node_log_probs = log_softmax(node_scores)
 
         output_dict = {}
