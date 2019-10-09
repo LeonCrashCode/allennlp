@@ -653,7 +653,6 @@ class RobertaSpanReasoningModel(Model):
 
         output_dict['best'] = node_log_probs.argmax(-1)
 
-        exit(-1)
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []
