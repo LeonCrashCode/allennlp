@@ -511,9 +511,6 @@ class RobertaSpanReasoningModel(Model):
         self.node_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
         self.edge_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
 
-        self.dummy_node = torch.zeros(1,transformer_config.hidden_size)
-        self.dummy_mask = torch.zeros(1)
-
         self.deep = 2
         self.score_outputs = Linear(transformer_config.hidden_size, 1)
         self.loss = torch.nn.NLLLoss()
@@ -583,7 +580,7 @@ class RobertaSpanReasoningModel(Model):
 
         #In order to masked index selected, add a zero node into the head of sequence of nodes
         #
-        zeros = self.dummy_node.expand(node_representations.size(0), self.dummy_node.size(0), self.dummy_node.size(1))
+        zeros = torch.zeros(node_representations.size(0), 1, node_representations.size(2), device=node_representations.get_device())
         node_representations = torch.cat((zeros, node_representations), dim=1)
         # print("node_representations", node_representations.size())
         #the nodes increase by 1
@@ -626,7 +623,7 @@ class RobertaSpanReasoningModel(Model):
 
             transition_score = torch.mean(transition_score,dim=2)
 
-            zeros = torch.zeros(transition_score.size(0), 1, transition_score.size(2))
+            zeros = torch.zeros(transition_score.size(0), 1, transition_score.size(2), device=transition_score.get_device())
             transition_score = torch.cat((zeros, transition_score), dim=1)
         
             node_representations += transition_score
@@ -636,7 +633,7 @@ class RobertaSpanReasoningModel(Model):
 
 
         masks = chunk_mask
-        zeros = self.dummy_mask.expand(masks.size(0), 1).long()
+        zeros = torch.zeros(masks.size(0), 1, device=masks.get_device()).long()
         masks = torch.cat((zeros, masks), dim=-1)
 
         for i in range(cands_start.size(0)):
@@ -652,7 +649,6 @@ class RobertaSpanReasoningModel(Model):
         self._accuracy(node_log_probs, cands_start)
 
         output_dict['best'] = node_log_probs.argmax(-1)
-
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []
