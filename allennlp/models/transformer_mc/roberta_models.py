@@ -536,6 +536,7 @@ class RobertaSpanReasoningModel(Model):
                 candidate_graph_edges: torch.LongTensor = None,
                 cands_start: torch.LongTensor = None,
                 cands_end: torch.LongTensor = None,
+                cands_best: torch.LongTensor = None,
                 metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
 
         # print(f"chunks:{chunks[0]}")
@@ -580,7 +581,7 @@ class RobertaSpanReasoningModel(Model):
 
         #In order to masked index selected, add a zero node into the head of sequence of nodes
         #
-        zeros = torch.zeros(node_representations.size(0), 1, node_representations.size(2), device=node_representations.get_device())
+        zeros = torch.zeros(node_representations.size(0), 1, node_representations.size(2), device=node_representations.get_device() if node_representations.get_device() != -1 else None)
         node_representations = torch.cat((zeros, node_representations), dim=1)
         # print("node_representations", node_representations.size())
         #the nodes increase by 1
@@ -589,6 +590,8 @@ class RobertaSpanReasoningModel(Model):
         candidate_graph_nodes += 1
         cands_start += 1
         cands_end += 1
+        cands_best += 1
+
 
         if sentence_graph_edges.size(-2) == 1:
             mask = (sentence_graph_edges[:, :, :, 0] >= 0).long()
@@ -623,7 +626,7 @@ class RobertaSpanReasoningModel(Model):
 
             transition_score = torch.mean(transition_score,dim=2)
 
-            zeros = torch.zeros(transition_score.size(0), 1, transition_score.size(2), device=transition_score.get_device())
+            zeros = torch.zeros(transition_score.size(0), 1, transition_score.size(2), device=transition_score.get_device() if transition_score.get_device() != -1 else None)
             transition_score = torch.cat((zeros, transition_score), dim=1)
         
             node_representations += transition_score
@@ -633,7 +636,7 @@ class RobertaSpanReasoningModel(Model):
 
 
         masks = chunk_mask
-        zeros = torch.zeros(masks.size(0), 1, device=masks.get_device()).long()
+        zeros = torch.zeros(masks.size(0), 1, device=masks.get_device() if masks.get_device() != -1 else None).long()
         masks = torch.cat((zeros, masks), dim=-1)
 
         for i in range(cands_start.size(0)):
@@ -644,11 +647,13 @@ class RobertaSpanReasoningModel(Model):
         node_log_probs = log_softmax(node_scores)
 
         output_dict = {}
-        output_dict["loss"] = self.loss(node_log_probs, cands_start)
+        output_dict["loss"] = self.loss(node_log_probs, cands_best)
 
-        self._accuracy(node_log_probs, cands_start)
-
+        self._accuracy(node_log_probs, cands_best)
+        output_dict['acc'] = self._accuracy.get_metric()
         output_dict['best'] = node_log_probs.argmax(-1)
+
+        # exit(-1)
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []

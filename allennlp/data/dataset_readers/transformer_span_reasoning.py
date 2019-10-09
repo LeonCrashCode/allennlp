@@ -172,6 +172,7 @@ class TransformerSpanReasoningReader(DatasetReader):
 
         fields['cands_start'] = LabelField(features.cands_start, skip_indexing=True)
         fields['cands_end'] = LabelField(features.cands_end, skip_indexing=True)
+        fields['cands_best'] = LabelField(features.cands_best, skip_indexing=True)
 
         metadata = {}
         metadata['qas_id'] = example.qas_id
@@ -298,6 +299,7 @@ class TransformerSpanReasoningReader(DatasetReader):
                         cands=cands,
                         corefs=corefs,
                         sentence_graph=sentence_graph,
+                        best=qa["best"],
                         is_impossible=qa["skip"])
                     examples.append(example)
                     if self._sample > 0 and len(examples) > self._sample:
@@ -662,6 +664,7 @@ class TransformerSpanReasoningReader(DatasetReader):
                     candidate_graph_edges=candidate_graph_edges,
                     cands_start=cands_start,
                     cands_end=cands_end,
+                    cands_best=cands_start+example.best
                     )
         # Just filter away impossible/missing spans for now (this uses labels, so not fair on dev/test):
         # if example.orig_answer_text and self._is_training:
@@ -709,6 +712,7 @@ class SpanPredictionExample(object):
                 cands,
                 corefs,
                 sentence_graph,
+                best,
                 is_impossible=None):
         self.qas_id = qas_id
         self.doc_text = doc_text
@@ -720,6 +724,7 @@ class SpanPredictionExample(object):
         self.cands = cands
         self.corefs = corefs
         self.sentence_graph = sentence_graph
+        self.best = best
         self.is_impossible = is_impossible
 
     def __str__(self):
@@ -755,7 +760,8 @@ class InputFeatures(object):
                 candidate_graph_nodes,
                 candidate_graph_edges,
                 cands_start,
-                cands_end):
+                cands_end,
+                cands_best):
     # def __init__(self,
     #              unique_id,
     #              example_index,
@@ -785,6 +791,7 @@ class InputFeatures(object):
         self.candidate_graph_edges = candidate_graph_edges
         self.cands_start = cands_start
         self.cands_end = cands_end
+        self.cands_best = cands_best
 
 
 def whitespace_tokenize(text):
