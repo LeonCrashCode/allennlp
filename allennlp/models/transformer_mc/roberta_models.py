@@ -583,7 +583,7 @@ class RobertaSpanReasoningModel(Model):
         #
         zeros = torch.zeros(node_representations.size(0), 1, node_representations.size(2), device=node_representations.get_device() if node_representations.get_device() != -1 else None)
         node_representations = torch.cat((zeros, node_representations), dim=1)
-        # print("node_representations", node_representations.size())
+        #print("node_representations", node_representations.size())
         #the nodes increase by 1
         sentence_graph_nodes += 1
         paragraph_coref_nodes += 1
@@ -598,26 +598,26 @@ class RobertaSpanReasoningModel(Model):
         else:
             mask = (sentence_graph_edges[:, :, :, 0] >= 0).squeeze(-1).long()
         sentence_graph_adjacent_edge_representations = self.edge_span_extractor(sequence_output, sentence_graph_edges, tokens_mask, mask)
-        # print("sentence_graph_adjacent_edge_representations", sentence_graph_adjacent_edge_representations.size())
+        #print("sentence_graph_adjacent_edge_representations", sentence_graph_adjacent_edge_representations.size())
 
         paragraph_coref_adjacent_edge_representations = self.embedder(paragraph_coref_edges["edges"])
-        # print("paragraph_coref_adjacent_edge_representations", paragraph_coref_adjacent_edge_representations.size())
+        #print("paragraph_coref_adjacent_edge_representations", paragraph_coref_adjacent_edge_representations.size())
 
         candidate_graph_adjacent_edge_representations = self.embedder(candidate_graph_edges["edges"])
-        # print("candidate_graph_adjacent_edge_representations", candidate_graph_adjacent_edge_representations.size())
+        #print("candidate_graph_adjacent_edge_representations", candidate_graph_adjacent_edge_representations.size())
 
 
         for deep in range(self.deep):
             # print(node_representations[0][0])
 
             sentence_graph_adjacent_node_representations = batched_index_select(node_representations, sentence_graph_nodes.squeeze(-1))
-            # print("sentence_graph_adjacent_node_representations", sentence_graph_adjacent_node_representations.size())
+            #print("sentence_graph_adjacent_node_representations", sentence_graph_adjacent_node_representations.size())
 
             paragraph_coref_adjacent_node_representations = batched_index_select(node_representations, paragraph_coref_nodes.squeeze(-1))
-            # print("paragraph_coref_adjacent_node_representations", paragraph_coref_adjacent_node_representations.size())
+            #print("paragraph_coref_adjacent_node_representations", paragraph_coref_adjacent_node_representations.size())
 
             candidate_graph_adjacent_node_representations = batched_index_select(node_representations, candidate_graph_nodes.squeeze(-1))
-            # print("candidate_graph_adjacent_node_representations", candidate_graph_adjacent_node_representations.size())
+            #print("candidate_graph_adjacent_node_representations", candidate_graph_adjacent_node_representations.size())
 
 
             transition_score = torch.cat((sentence_graph_adjacent_node_representations * sentence_graph_adjacent_edge_representations 
@@ -625,7 +625,7 @@ class RobertaSpanReasoningModel(Model):
                                 , candidate_graph_adjacent_node_representations * candidate_graph_adjacent_edge_representations), dim=2)
 
             transition_score = torch.mean(transition_score,dim=2)
-
+            #print("transition_score", transition_score.size())
             zeros = torch.zeros(transition_score.size(0), 1, transition_score.size(2), device=transition_score.get_device() if transition_score.get_device() != -1 else None)
             transition_score = torch.cat((zeros, transition_score), dim=1)
         
@@ -646,6 +646,12 @@ class RobertaSpanReasoningModel(Model):
 
         node_log_probs = log_softmax(node_scores)
 
+        #print(node_log_probs)
+        #print(node_log_probs.size())
+        #print(cands_best)
+        #print(cands_best.size())
+        #print(metadata[0]['qas_id'])
+        #print(metadata[1]['qas_id'])
         output_dict = {}
         output_dict["loss"] = self.loss(node_log_probs, cands_best)
 

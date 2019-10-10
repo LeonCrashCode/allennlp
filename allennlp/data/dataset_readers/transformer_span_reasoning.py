@@ -627,6 +627,7 @@ class TransformerSpanReasoningReader(DatasetReader):
             if len(item) == 0:
                 item.append("NONE")
 
+        assert cands_start + example.best <= cands_end
         # for chunk in example.doc_chunks:
         #     print(tokens[chunk[0]:chunk[1]+1])
         # for chunk in example.q_chunks:
@@ -649,6 +650,7 @@ class TransformerSpanReasoningReader(DatasetReader):
             logger.info(f"candidate_graph_edges: {candidate_graph_edges}" )
             logger.info(f"cands_start: {cands_start}" )
             logger.info(f"cands_end: {cands_end}" )
+            logger.info(f"cands_best: {cands_start + example.best}")
 
         return InputFeatures(
                     unique_id=example.qas_id,
