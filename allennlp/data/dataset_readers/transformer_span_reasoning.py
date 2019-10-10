@@ -176,6 +176,8 @@ class TransformerSpanReasoningReader(DatasetReader):
 
         metadata = {}
         metadata['qas_id'] = example.qas_id
+        metadata['cands_start'] = features.cands_start
+        metadata['cands_end'] = features.cands_end
         if debug > 0:
             logger.info(f"tokens = {features.tokens}")
             logger.info(f"segment_ids = {features.segment_ids}")

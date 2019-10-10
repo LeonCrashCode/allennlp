@@ -476,6 +476,7 @@ class RobertaSpanReasoningModel(Model):
     def __init__(self,
                  vocab: Vocabulary,
                  #span_extractor: SpanExtractor,
+                 gnn_step: int = 2,
                  pretrained_model: str = None,
                  requires_grad: bool = True,
                  transformer_weights_model: str = None,
@@ -511,7 +512,7 @@ class RobertaSpanReasoningModel(Model):
         self.node_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
         self.edge_span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
 
-        self.deep = 2
+        self.deep = gnn_step
         self.score_outputs = Linear(transformer_config.hidden_size, 1)
         self.loss = torch.nn.NLLLoss()
 
@@ -656,10 +657,14 @@ class RobertaSpanReasoningModel(Model):
         output_dict["loss"] = self.loss(node_log_probs, cands_best)
 
         self._accuracy(node_log_probs, cands_best)
-        output_dict['acc'] = self._accuracy.get_metric()
         output_dict['best'] = node_log_probs.argmax(-1)
 
-        # exit(-1)
+        if metadata is not None:
+            output_dict["qid"] = []
+            output_dict["cands_start"] = cands_start
+            output_dict["cands_end"] = cands_end
+            for i in range(batch_size):
+                output_dict["qid"].append(metadata[i]['qas_id'])
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []

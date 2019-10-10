@@ -26,6 +26,7 @@ from allennlp.predictors.sentence_tagger import SentenceTaggerPredictor
 from allennlp.predictors.seq2seq import Seq2SeqPredictor
 from allennlp.predictors.simple_seq2seq import SimpleSeq2SeqPredictor
 from allennlp.predictors.span_prediction_ropes import SpanPredictionRopesPredictor
+from allennlp.predictors.span_reasoning_ropes import SpanReasoningRopesPredictor
 from allennlp.predictors.text_classifier import TextClassifierPredictor
 from allennlp.predictors.wikitables_parser import WikiTablesParserPredictor
 from allennlp.predictors.sequence_labeler import SequenceLabellingGECPredictor
