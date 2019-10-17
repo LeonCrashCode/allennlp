@@ -153,7 +153,7 @@ class TransformerSpanReasoningSyntaxReader(DatasetReader):
         segment_ids_field = SequenceLabelField(features.segment_ids, tokens_field)
         fields['tokens'] = tokens_field
         fields['segment_ids'] = segment_ids_field
-
+        
         chunks_field = ListField([SpanField(chunk[0], chunk[1], tokens_field) for chunk in features.chunks])
         sentence_graph_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.sentence_graph_nodes])
         # sentence_graph_edges_field = ListField([TextField([Token(edge) for edge in edges], self._edge_indexers) for edges in features.sentence_graph_edges])
