@@ -731,6 +731,7 @@ class RobertaSpanReasoningSyntaxModel(Model):
     def __init__(self,
                  vocab: Vocabulary,
                  #span_extractor: SpanExtractor,
+                 gnn_nonlinear: str = "tanh",
                  gnn_step: int = 2,
                  pretrained_model: str = None,
                  requires_grad: bool = True,
@@ -765,7 +766,14 @@ class RobertaSpanReasoningSyntaxModel(Model):
                             embedding_dim=transformer_config.hidden_size*2,
                             padding_index=0)
         self.node_span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
-        self.nonlinear = torch.nn.ReLU()
+
+        if gnn_nonlinear == "tanh":
+            self.nonlinear = torch.nn.Tanh()
+        elif gnn_nonlinear == "relu":
+            self.nonlinear = torch.nn.ReLU()
+        else:
+            self.nonlinear = torch.nn.Tanh()
+
 
         self.deep = gnn_step
         self.score_outputs = Linear(transformer_config.hidden_size*2, 1)
@@ -866,10 +874,13 @@ class RobertaSpanReasoningSyntaxModel(Model):
             #print("node_representations", node_representations.size())
 
 
-            
+        
+        #print("node_representations", node_representations.size())
+        
         node_scores = self.score_outputs(node_representations).squeeze(-1) #batch_size : node_from
 
-
+        #print("node_scores", node_scores.size())
+        #print("node_scores", node_scores)
         masks = chunk_mask
 
         for i in range(cands_start.size(0)):
@@ -877,8 +888,13 @@ class RobertaSpanReasoningSyntaxModel(Model):
 
         node_scores -= (masks == 0).float() * 1e10
 
+        #print("node_scores", node_scores.size())
+        #print("node_scores", node_scores)
+
         node_log_probs = log_softmax(node_scores)
 
+        #print("node_log_probs", node_log_probs.size())
+        #print("node_log_probs", node_log_probs)
         #print(node_log_probs)
         #print(node_log_probs.size())
         #print(cands_best)
@@ -897,7 +913,8 @@ class RobertaSpanReasoningSyntaxModel(Model):
             output_dict["cands_end"] = cands_end
             for i in range(batch_size):
                 output_dict["qid"].append(metadata[i]['qas_id'])
-
+        #print(output_dict)
+        #exit(-1)
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []
