@@ -902,11 +902,12 @@ class RobertaSpanReasoningSyntaxModel(Model):
         #print(metadata[0]['qas_id'])
         #print(metadata[1]['qas_id'])
         output_dict = {}
-        output_dict["loss"] = self.loss(node_log_probs, cands_best)
+
+        if cands_best[0][0] > 0:
+            output_dict["loss"] = self.loss(node_log_probs, cands_best)
 
         self._accuracy(node_log_probs, cands_best)
         output_dict['best'] = node_log_probs.argmax(-1)
-        output_dict['oracle'] = cands_best.tolist()
 
         if metadata is not None:
             output_dict["qid"] = []

@@ -582,7 +582,7 @@ class TransformerSpanReasoningSyntaxReader(DatasetReader):
 
         
 
-        assert cands_start + example.best < cands_end
+        # assert cands_start + example.best < cands_end
         # for chunk in example.doc_chunks:
         #     print(tokens[chunk[0]:chunk[1]+1])
         # for chunk in example.q_chunks:
@@ -601,7 +601,8 @@ class TransformerSpanReasoningSyntaxReader(DatasetReader):
             logger.info(f"sentence_graph_edges: {sentence_graph_edges}" )
             logger.info(f"cands_start: {cands_start}" )
             logger.info(f"cands_end: {cands_end}" )
-            logger.info(f"cands_best: {cands_start + example.best}")
+            if example.best >= 0:
+                logger.info(f"cands_best: {cands_start + example.best}")
 
         return InputFeatures(
                     unique_id=example.qas_id,
@@ -613,7 +614,7 @@ class TransformerSpanReasoningSyntaxReader(DatasetReader):
                     sentence_graph_edges=sentence_graph_edges,
                     cands_start=cands_start,
                     cands_end=cands_end,
-                    cands_best=cands_start+example.best
+                    cands_best=-1 if example.best < 0 else cands_start+example.best
                     )
         # Just filter away impossible/missing spans for now (this uses labels, so not fair on dev/test):
         # if example.orig_answer_text and self._is_training:
