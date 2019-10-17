@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 # Much of the code is modified from pytorch-transformer examples for SQuAD
 # The treatment of tokens and their string positions is a bit of a mess
 
-@DatasetReader.register("transformer_span_reasoning")
-class TransformerSpanReasoningReader(DatasetReader):
+@DatasetReader.register("transformer_span_reasoning_syntax")
+class TransformerSpanReasoningSyntaxReader(DatasetReader):
     """
 
     """
@@ -156,19 +156,18 @@ class TransformerSpanReasoningReader(DatasetReader):
 
         chunks_field = ListField([SpanField(chunk[0], chunk[1], tokens_field) for chunk in features.chunks])
         sentence_graph_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.sentence_graph_nodes])
-        sentence_graph_edges_field = ListField([ListField([SpanField(n[0], n[1], tokens_field) for n in nodes]) for nodes in features.sentence_graph_edges])
-        paragraph_coref_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.paragraph_coref_nodes])
-        paragraph_coref_edges_field = ListField([TextField([ Token(edge) for edge in edges], self._edge_indexers) for edges in features.paragraph_coref_edges])
-        candidate_graph_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.candidate_graph_nodes])
-        candidate_graph_edges_field = ListField([TextField([ Token(edge) for edge in edges], self._edge_indexers) for edges in features.candidate_graph_edges])
+        # sentence_graph_edges_field = ListField([TextField([Token(edge) for edge in edges], self._edge_indexers) for edges in features.sentence_graph_edges])
+        fs = []
+        for edges in features.sentence_graph_edges:
+            if len(edges) == 0:
+                fs.append(TextField([], self._edge_indexers))
+            else:
+                fs.append(TextField([Token(edge) for edge in edges], self._edge_indexers))
+        sentence_graph_edges_field = ListField(fs)
 
         fields['chunks'] = chunks_field
         fields['sentence_graph_nodes'] = sentence_graph_nodes_field
         fields['sentence_graph_edges'] = sentence_graph_edges_field
-        fields['paragraph_coref_nodes'] = paragraph_coref_nodes_field
-        fields['paragraph_coref_edges'] = paragraph_coref_edges_field
-        fields['candidate_graph_nodes'] = candidate_graph_nodes_field
-        fields['candidate_graph_edges'] = candidate_graph_edges_field
 
         fields['cands_start'] = LabelField(features.cands_start, skip_indexing=True)
         fields['cands_end'] = LabelField(features.cands_end, skip_indexing=True)
@@ -184,11 +183,8 @@ class TransformerSpanReasoningReader(DatasetReader):
             logger.info(f"chunks = {features.chunks}")
             logger.info(f"sentence_graph_nodes = {features.sentence_graph_nodes}")
             logger.info(f"sentence_graph_edges = {features.sentence_graph_edges}")
-            logger.info(f"paragraph_coref_nodes = {features.paragraph_coref_nodes}")
-            logger.info(f"paragraph_coref_edges = {features.paragraph_coref_edges}")
-            logger.info(f"candidate_graph_nodes = {features.candidate_graph_nodes}")
-            logger.info(f"candidate_graph_edges = {features.candidate_graph_edges}")
-
+            # for item in features.chunks:
+            #     print(features.tokens[item[0]:item[1]+1])
         fields["metadata"] = MetadataField(metadata)
         return Instance(fields)
 
@@ -280,14 +276,7 @@ class TransformerSpanReasoningReader(DatasetReader):
                     for j in range(len(cands)):
                         cands[j] = [cands[j]["roberta_start"], cands[j]["roberta_end"], cands[j]["stride_index"]] + [[int(x.strip().split()[0]), x.strip().split()[1]] for x in cands[j]["related"].split("|||")] # [start, end, [chunkid, label]*n]
 
-                    corefs = [ [int(x.strip().split()[0]), int(x.strip().split()[1])] for x in qa["corefs"].split("|||")]
-                    sentence_graph = []
-                    sentence_chunk_offsets.append(len(chunks))
-                    for j, x in enumerate(sentence_chunk_offsets[:-1]): # build completed graph inside of sentences
-                        x = int(x)
-                        y = int(sentence_chunk_offsets[j+1])
-                        sentence_graph += self._generate_completed_graph(x, y)
-                    sentence_graph.sort()
+                    graph = [ [int(x.strip().split()[0]), int(x.strip().split()[1]), x.strip().split()[2]] for x in qa["deps"].split("|||")]
 
 
                     example = SpanPredictionExample(
@@ -299,8 +288,7 @@ class TransformerSpanReasoningReader(DatasetReader):
                         q_tokens=question_tokens,
                         q_chunks=chunks[chunksq:],
                         cands=cands,
-                        corefs=corefs,
-                        sentence_graph=sentence_graph,
+                        sentence_graph=graph,
                         best=qa["best"],
                         is_impossible=qa["skip"])
                     examples.append(example)
@@ -481,16 +469,6 @@ class TransformerSpanReasoningReader(DatasetReader):
 
         if ndelchunk != 0:
             edges = []
-            for edge in example.corefs:
-                if edge[0] < ndelchunk or edge[1] < ndelchunk:
-                    pass
-                else:
-                    edge[0] -= ndelchunk
-                    edge[1] -= ndelchunk
-                    edges.append(edge)
-            example.corefs = edges
-
-            edges = []
             for edge in example.sentence_graph:
                 if edge[0] < ndelchunk or edge[1] < ndelchunk:
                     pass
@@ -590,44 +568,19 @@ class TransformerSpanReasoningReader(DatasetReader):
         sentence_graph_edges = [ [] for _ in range(len(chunks))]
         for item in example.sentence_graph:
             sentence_graph_nodes[item[0]].append(item[1])
-            sentence_graph_nodes[item[1]].append(item[0])
-            sentence_graph_edges[item[0]].append(tuple([chunks[item[0]][1] + 1, chunks[item[1]][0] - 1]))
-            sentence_graph_edges[item[1]].append(tuple([chunks[item[0]][1] + 1, chunks[item[1]][0] - 1]))
+            sentence_graph_edges[item[0]].append(item[2])
+        for item, label in zip(cands, cands_label): 
+            sentence_graph_nodes[item[0]].append(item[1])
+            sentence_graph_edges[item[0]].append(label)
+
         for item in sentence_graph_nodes:
             if len(item) == 0:
                 item.append(-1)
-        for item in sentence_graph_edges:
-            if len(item) == 0:
-                item.append(tuple([-1, -1]))
+        # for item in sentence_graph_edges:
+        #     if len(item) == 0:
+        #         item.append("None")
 
-        #coref graph
-        paragraph_coref_nodes = [ [] for _ in range(len(chunks))]
-        paragraph_coref_edges = [ [] for _ in range(len(chunks))]
-        for item in example.corefs:
-            paragraph_coref_nodes[item[0]].append(item[1])
-            paragraph_coref_nodes[item[1]].append(item[0])
-            paragraph_coref_edges[item[0]].append("coref")
-            paragraph_coref_edges[item[1]].append("coref")
-        for item in paragraph_coref_nodes:
-            if len(item) == 0:
-                item.append(-1)
-        for item in paragraph_coref_edges:
-            if len(item) == 0:
-                item.append("NONE")
-
-        #candidates graph
-        candidate_graph_nodes = [ [] for _ in range(len(chunks))]
-        candidate_graph_edges = [ [] for _ in range(len(chunks))]
-
-        for item, label in zip(cands, cands_label): 
-            candidate_graph_nodes[item[0]].append(item[1])
-            candidate_graph_edges[item[0]].append(label)
-        for item in candidate_graph_nodes:
-            if len(item) == 0:
-                item.append(-1)
-        for item in candidate_graph_edges:
-            if len(item) == 0:
-                item.append("NONE")
+        
 
         assert cands_start + example.best < cands_end
         # for chunk in example.doc_chunks:
@@ -646,10 +599,6 @@ class TransformerSpanReasoningReader(DatasetReader):
             logger.info(f"chunks: {chunks}" )
             logger.info(f"sentence_graph_nodes: {sentence_graph_nodes}" )
             logger.info(f"sentence_graph_edges: {sentence_graph_edges}" )
-            logger.info(f"paragraph_coref_nodes: {paragraph_coref_nodes}" )
-            logger.info(f"paragraph_coref_edges: {paragraph_coref_edges}" )
-            logger.info(f"candidate_graph_nodes: {candidate_graph_nodes}" )
-            logger.info(f"candidate_graph_edges: {candidate_graph_edges}" )
             logger.info(f"cands_start: {cands_start}" )
             logger.info(f"cands_end: {cands_end}" )
             logger.info(f"cands_best: {cands_start + example.best}")
@@ -662,10 +611,6 @@ class TransformerSpanReasoningReader(DatasetReader):
                     chunks=chunks,
                     sentence_graph_nodes=sentence_graph_nodes,
                     sentence_graph_edges=sentence_graph_edges,
-                    paragraph_coref_nodes=paragraph_coref_nodes,
-                    paragraph_coref_edges=paragraph_coref_edges,
-                    candidate_graph_nodes=candidate_graph_nodes,
-                    candidate_graph_edges=candidate_graph_edges,
                     cands_start=cands_start,
                     cands_end=cands_end,
                     cands_best=cands_start+example.best
@@ -714,7 +659,6 @@ class SpanPredictionExample(object):
                 q_tokens,
                 q_chunks,
                 cands,
-                corefs,
                 sentence_graph,
                 best,
                 is_impossible=None):
@@ -726,7 +670,6 @@ class SpanPredictionExample(object):
         self.q_tokens = q_tokens
         self.q_chunks = q_chunks
         self.cands = cands
-        self.corefs = corefs
         self.sentence_graph = sentence_graph
         self.best = best
         self.is_impossible = is_impossible
@@ -741,7 +684,6 @@ class SpanPredictionExample(object):
         s += f"\n  doc_chunks: {self.doc_chunks}"
         s += "\n  q_tokens: [%s]" % (" ".join(self.q_tokens))
         s += f"\n  q_chunks: {self.q_chunks}"
-        s += f"\n. corefs: {self.corefs}"
         s += f"\n. sentence_graph: {self.sentence_graph}"
         s += f"\n. cands: {self.cands}"
         if self.is_impossible:
@@ -759,10 +701,6 @@ class InputFeatures(object):
                 chunks,
                 sentence_graph_nodes,
                 sentence_graph_edges,
-                paragraph_coref_nodes,
-                paragraph_coref_edges,
-                candidate_graph_nodes,
-                candidate_graph_edges,
                 cands_start,
                 cands_end,
                 cands_best):
@@ -789,10 +727,6 @@ class InputFeatures(object):
         self.chunks = chunks
         self.sentence_graph_nodes=sentence_graph_nodes
         self.sentence_graph_edges = sentence_graph_edges
-        self.paragraph_coref_nodes = paragraph_coref_nodes
-        self.paragraph_coref_edges = paragraph_coref_edges
-        self.candidate_graph_nodes = candidate_graph_nodes
-        self.candidate_graph_edges = candidate_graph_edges
         self.cands_start = cands_start
         self.cands_end = cands_end
         self.cands_best = cands_best

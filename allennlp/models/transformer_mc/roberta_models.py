@@ -17,7 +17,7 @@ from allennlp.models.reading_comprehension.util import get_best_span
 from allennlp.nn import RegularizerApplicator, util
 from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1, F1Measure, FBetaMeasure
 from allennlp.modules.token_embedders import Embedding
-from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor
+from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor, EndpointSpanExtractor
 
 from allennlp.nn.util import batched_index_select
 @Model.register("roberta_mc_qa")
@@ -723,6 +723,238 @@ class RobertaSpanReasoningModel(Model):
                              cuda_device=cuda_device,
                              **kwargs)
 
+@Model.register("roberta_span_reasoning_syntax")
+class RobertaSpanReasoningSyntaxModel(Model):
+    """
+
+    """
+    def __init__(self,
+                 vocab: Vocabulary,
+                 #span_extractor: SpanExtractor,
+                 gnn_step: int = 2,
+                 pretrained_model: str = None,
+                 requires_grad: bool = True,
+                 transformer_weights_model: str = None,
+                 layer_freeze_regexes: List[str] = None,
+                 on_load: bool = False,
+                 regularizer: Optional[RegularizerApplicator] = None) -> None:
+        super().__init__(vocab, regularizer)
+
+        if on_load:
+            logging.info(f"Skipping loading of initial Transformer weights")
+            transformer_config = RobertaConfig.from_pretrained(pretrained_model)
+            self._transformer_model = RobertaModel(transformer_config)
+
+        elif transformer_weights_model:
+            logging.info(f"Loading Transformer weights model from {transformer_weights_model}")
+            transformer_model_loaded = load_archive(transformer_weights_model)
+            self._transformer_model = transformer_model_loaded.model._transformer_model
+        else:
+            self._transformer_model = RobertaModel.from_pretrained(pretrained_model)
+
+        for name, param in self._transformer_model.named_parameters():
+            grad = requires_grad
+            if layer_freeze_regexes and grad:
+                grad = not any([bool(re.search(r, name)) for r in layer_freeze_regexes])
+            param.requires_grad = grad
+
+        transformer_config = self._transformer_model.config
+
+        self.embedder = Embedding(
+                            num_embeddings=vocab.get_vocab_size('edges'),
+                            embedding_dim=transformer_config.hidden_size*2,
+                            padding_index=0)
+        self.node_span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
+        self.nonlinear = torch.nn.ReLU()
+
+        self.deep = gnn_step
+        self.score_outputs = Linear(transformer_config.hidden_size*2, 1)
+        self.loss = torch.nn.NLLLoss()
+
+        # Import GTP2 machinery to get from tokens to actual text
+        self.byte_decoder = {v: k for k, v in bytes_to_unicode().items()}
+
+        self._accuracy = CategoricalAccuracy()
+        self._debug = 0
+        self._padding_value = 1  # The index of the RoBERTa padding token
+
+
+
+    def forward(self,
+                tokens: Dict[str, torch.LongTensor],
+                segment_ids: torch.LongTensor = None,
+                chunks: torch.LongTensor = None,
+                sentence_graph_nodes: torch.LongTensor = None,
+                sentence_graph_edges: torch.LongTensor = None,
+                cands_start: torch.LongTensor = None,
+                cands_end: torch.LongTensor = None,
+                cands_best: torch.LongTensor = None,
+                metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
+
+        # print(f"chunks:{chunks[0]}")
+        # print(f"sentence_graph: {sentence_graph[0][0]}")
+        # print(f"corefs: {corefs[0][0]}")
+        # print(f"cands: {cands}")
+        # print(f"cands_start: {cands_start}")
+        # print(f"cands_end: {cands_end}")
+        # print(sentence_graph.size())
+        # print(corefs.size())
+        # print(cands.size())
+        # print(metadata[0]["qas_id"])
+        # exit()
+        self._debug -= 1
+        input_ids = tokens['tokens']
+
+        batch_size = sentence_graph_edges["edges"].size(0)
+        num_nodes = sentence_graph_edges["edges"].size(1)
+        num_nodes_adjacent = sentence_graph_edges["edges"].size(2)
+
+        tokens_mask = (input_ids != self._padding_value).long()
+        
+        # if self._debug > 0:
+        #     print(f"batch_size = {batch_size}")
+        #     print(f"num_choices = {num_choices}")
+        #     print(f"tokens_mask = {tokens_mask}")
+        #     print(f"input_ids.size() = {input_ids.size()}")
+        #     print(f"input_ids = {input_ids}")
+        #     print(f"segment_ids = {segment_ids}")
+        #     print(f"start_positions = {start_positions}")
+        #     print(f"end_positions = {end_positions}")
+
+        # Segment ids are not used by RoBERTa
+
+        transformer_outputs = self._transformer_model(input_ids=input_ids,
+                                                      # token_type_ids=segment_ids,
+                                                      attention_mask=tokens_mask)
+        sequence_output = transformer_outputs[0]
+
+        chunk_mask = (chunks[:, :, 0] >= 0).squeeze(-1).long()
+        node_representations = self.node_span_extractor(sequence_output, chunks, tokens_mask, chunk_mask)
+        
+        #In order to masked index selected, add a zero node into the head of sequence of nodes
+        #
+        zeros = torch.zeros(node_representations.size(0), 1, node_representations.size(2), device=node_representations.get_device() if node_representations.get_device() != -1 else None)
+        
+        #print("node_representations", node_representations.size())
+        #print("node_representations", node_representations.size())
+        #the nodes increase by 1
+        sentence_graph_nodes += 1
+
+
+        adjacent_edges_representations = self.embedder(sentence_graph_edges["edges"])
+        edges_masks = (sentence_graph_edges["edges"] > 0).float()
+        #print("adjacent_edges_representations", adjacent_edges_representations.size())
+
+        for deep in range(self.deep):
+            # print(node_representations[0][0])
+            padded_node_representations = torch.cat((zeros, node_representations), dim=1)
+            adjacent_node_representations = batched_index_select(padded_node_representations, sentence_graph_nodes.squeeze(-1))
+            #print("adjacent_node_representations", adjacent_node_representations.size())
+
+            scores = torch.bmm(node_representations.view(batch_size*num_nodes, 1, -1), adjacent_edges_representations.view(batch_size*num_nodes, num_nodes_adjacent, -1).transpose(1,2))
+            #print("scores", scores.size())
+
+            weights = scores.squeeze(1).view(batch_size, num_nodes, -1) + ((edges_masks - 1) * 1e30)
+            weights = torch.softmax(weights, dim=-1) * edges_masks
+            #print("weights", weights.size())
+
+            transition_representations = torch.bmm(weights.unsqueeze(2).view(batch_size*num_nodes, 1, -1), adjacent_node_representations.view(batch_size*num_nodes, num_nodes_adjacent, -1))
+            transition_representations = transition_representations.squeeze(1).view(batch_size, num_nodes, -1)
+            #print("transition_representations", transition_representations.size())
+
+            node_representations = self.nonlinear(transition_representations + node_representations)
+            #print("node_representations", node_representations.size())
+
+
+            
+        node_scores = self.score_outputs(node_representations).squeeze(-1) #batch_size : node_from
+
+
+        masks = chunk_mask
+
+        for i in range(cands_start.size(0)):
+            masks[i][:cands_start[i]] = 0
+
+        node_scores -= (masks == 0).float() * 1e10
+
+        node_log_probs = log_softmax(node_scores)
+
+        #print(node_log_probs)
+        #print(node_log_probs.size())
+        #print(cands_best)
+        #print(cands_best.size())
+        #print(metadata[0]['qas_id'])
+        #print(metadata[1]['qas_id'])
+        output_dict = {}
+        output_dict["loss"] = self.loss(node_log_probs, cands_best)
+
+        self._accuracy(node_log_probs, cands_best)
+        output_dict['best'] = node_log_probs.argmax(-1)
+
+        if metadata is not None:
+            output_dict["qid"] = []
+            output_dict["cands_start"] = cands_start
+            output_dict["cands_end"] = cands_end
+            for i in range(batch_size):
+                output_dict["qid"].append(metadata[i]['qas_id'])
+
+        # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
+        # if metadata is not None:
+        #     output_dict['best_span_str'] = []
+        #     output_dict['exact_match'] = []
+        #     output_dict['f1_score'] = []
+        #     output_dict['qid'] = []
+        #     tokens_texts = []
+        #     for i in range(batch_size):
+        #         tokens_text = metadata[i]['tokens']
+        #         tokens_texts.append(tokens_text)
+        #         predicted_span = tuple(best_span[i].detach().cpu().numpy())
+        #         predicted_start = predicted_span[0]
+        #         predicted_end = predicted_span[1]
+        #         predicted_tokens = tokens_text[predicted_start:(predicted_end + 1)]
+        #         best_span_string = self.convert_tokens_to_string(predicted_tokens)
+        #         output_dict['best_span_str'].append(best_span_string)
+        #         answer_texts = metadata[i].get('answer_texts', [])
+        #         exact_match = 0
+        #         f1_score = 0
+        #         if answer_texts:
+        #             exact_match, f1_score = self._squad_metrics(best_span_string, answer_texts)
+        #         output_dict['exact_match'].append(exact_match)
+        #         output_dict['f1_score'].append(f1_score)
+        #         output_dict['qid'].append(metadata[i]['id'])
+        #     output_dict['tokens_texts'] = tokens_texts
+
+        # if self._debug > 0:
+        #     print(f"output_dict = {output_dict}")
+
+        return output_dict
+
+    def convert_tokens_to_string(self, tokens):
+        """ Converts a sequence of tokens (string) in a single string. """
+        text = ''.join(tokens)
+        text = bytearray([self.byte_decoder[c] for c in text]).decode('utf-8', errors='replace')
+        return text
+
+    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
+        return {
+            'acc': self._accuracy.get_metric(reset)
+        }
+
+    @classmethod
+    def _load(cls,
+              config: Params,
+              serialization_dir: str,
+              weights_file: str = None,
+              cuda_device: int = -1,
+              **kwargs) -> 'Model':
+        model_params = config.get('model')
+        model_params.update({"on_load": True})
+        config.update({'model': model_params})
+        return super()._load(config=config,
+                             serialization_dir=serialization_dir,
+                             weights_file=weights_file,
+                             cuda_device=cuda_device,
+                             **kwargs)
 
 @Model.register("roberta_sequence_labelling")
 class RobertaSequenceLabelingModel(Model):
