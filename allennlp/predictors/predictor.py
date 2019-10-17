@@ -42,7 +42,7 @@ DEFAULT_PREDICTORS = {
         'bert_span_prediction':'span-prediction-ropes',
         'roberta_sequence_labelling':'sequence-labelling-gec',
         'roberta_span_reasoning': 'span-reasoning-ropes',
-        'roberta_span_reasoning': 'span-reasoning-ropes'
+        'roberta_span_reasoning_syntax': 'span-reasoning-ropes'
 }
 
 class Predictor(Registrable):
