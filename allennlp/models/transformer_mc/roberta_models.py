@@ -906,6 +906,7 @@ class RobertaSpanReasoningSyntaxModel(Model):
 
         self._accuracy(node_log_probs, cands_best)
         output_dict['best'] = node_log_probs.argmax(-1)
+        output_dict['oracle'] = cands_best.tolist()
 
         if metadata is not None:
             output_dict["qid"] = []
