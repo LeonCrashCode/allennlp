@@ -903,7 +903,7 @@ class RobertaSpanReasoningSyntaxModel(Model):
         #print(metadata[1]['qas_id'])
         output_dict = {}
 
-        if cands_best[0][0] > 0:
+        if cands_best[0] >= 0:
             output_dict["loss"] = self.loss(node_log_probs, cands_best)
 
         self._accuracy(node_log_probs, cands_best)
