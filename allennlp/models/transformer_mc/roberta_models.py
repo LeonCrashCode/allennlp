@@ -437,7 +437,7 @@ class RobertaSpanPredictionModel(Model):
                 output_dict['doc_tokens'].append(metadata[i]['doc_tokens'])
                 output_dict['token_to_orig_map'].append(metadata[i]['token_to_orig_map'])
                 output_dict['question_tokens'].append(metadata[i]['question_tokens'])
-                output_dict['q_token_to_orig_map'].append(metadata[i]['token_to_orig_map'])
+                output_dict['q_token_to_orig_map'].append(metadata[i]['q_token_to_orig_map'])
             output_dict['tokens_texts'] = tokens_texts
 
         if self._debug > 0:
