@@ -159,7 +159,10 @@ class TransformerSpanPredictionReader(DatasetReader):
             "context_full": example.doc_text,
             "answer_texts": example.all_answer_texts,
             "answer_mask": features.p_mask,
-            "token_to_orig_map": features.token_to_orig_map
+            "doc_tokens": example.doc_tokens,
+            "token_to_orig_map": features.token_to_orig_map,
+            "question_tokens": example.question_tokens,
+            "q_token_to_orig_map": features.q_token_to_orig_map
         }
 
         if features.start_position is not None:
@@ -476,6 +479,7 @@ class TransformerSpanPredictionReader(DatasetReader):
         for (doc_span_index, doc_span) in enumerate(doc_spans):
             tokens = []
             token_to_orig_map = {}
+            q_token_to_orig_map = {}
             token_is_max_context = {}
             segment_ids = []
 
@@ -511,7 +515,8 @@ class TransformerSpanPredictionReader(DatasetReader):
             # Query
             query_p_mask = 0 if self._answer_can_be_in_question else 1
             query_offset = len(tokens)
-            for token in all_query_tokens:
+            for i, token in enumerate(all_query_tokens):
+                q_token_to_orig_map[len(tokens)] = q_tok_to_orig_index[i]
                 tokens.append(token)
                 segment_ids.append(sequence_b_segment_id)
                 p_mask.append(query_p_mask)
@@ -580,6 +585,7 @@ class TransformerSpanPredictionReader(DatasetReader):
                     tokens=tokens,
                     token_to_orig_map=token_to_orig_map,
                     token_is_max_context=token_is_max_context,
+                    q_token_to_orig_map=q_token_to_orig_map,
                     input_ids=None,
                     input_mask=None,
                     segment_ids=segment_ids,
@@ -679,6 +685,7 @@ class InputFeatures(object):
                  tokens,
                  token_to_orig_map,
                  token_is_max_context,
+                 q_token_to_orig_map,
                  input_ids,
                  input_mask,
                  segment_ids,
@@ -703,7 +710,7 @@ class InputFeatures(object):
         self.start_position = start_position
         self.end_position = end_position
         self.is_impossible = is_impossible
-
+        self.q_token_to_orig_map = q_token_to_orig_map
 
 def whitespace_tokenize(text):
     """Runs basic whitespace cleaning and splitting on a piece of text."""
