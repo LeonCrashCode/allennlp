@@ -158,7 +158,8 @@ class TransformerSpanPredictionReader(DatasetReader):
             "tokens": [x.text for x in features.tokens],
             "context_full": example.doc_text,
             "answer_texts": example.all_answer_texts,
-            "answer_mask": features.p_mask
+            "answer_mask": features.p_mask,
+            "token_to_orig_map": features.token_to_orig_map
         }
 
         if features.start_position is not None:

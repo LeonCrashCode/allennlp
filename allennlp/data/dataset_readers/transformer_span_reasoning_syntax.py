@@ -183,8 +183,7 @@ class TransformerSpanReasoningSyntaxReader(DatasetReader):
             logger.info(f"chunks = {features.chunks}")
             logger.info(f"sentence_graph_nodes = {features.sentence_graph_nodes}")
             logger.info(f"sentence_graph_edges = {features.sentence_graph_edges}")
-            # for item in features.chunks:
-            #     print(features.tokens[item[0]:item[1]+1])
+            
         fields["metadata"] = MetadataField(metadata)
         return Instance(fields)
 
