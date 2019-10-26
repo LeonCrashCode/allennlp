@@ -466,7 +466,7 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
             example.sentence_graph = edges
 
             for i in range(len(example.best)): #  positives
-                assert example.best[i] < ndelchunk
+                assert example.best[i] >= ndelchunk
                 example.best[i] -= ndelchunk
 
         # print(f"window example.doc_chunks : {example.doc_chunks}")
