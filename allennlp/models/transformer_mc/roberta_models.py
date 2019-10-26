@@ -1161,8 +1161,7 @@ class RobertaSpanReasoningSingleModel(Model):
         #print(metadata[1]['qas_id'])
         output_dict = {}
 
-        print(masked_node_log_probs.size())
-        print(best)
+
         output_dict["loss"] = self.loss(masked_node_log_probs, best)
 
         self._accuracy(node_scores, best)
@@ -1174,8 +1173,7 @@ class RobertaSpanReasoningSingleModel(Model):
             output_dict["cands"] = cands
             for i in range(batch_size):
                 output_dict["qid"].append(metadata[i]['qas_id'])
-        print(output_dict)
-        exit(-1)
+
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []
