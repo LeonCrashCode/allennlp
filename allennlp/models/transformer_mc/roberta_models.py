@@ -1164,7 +1164,7 @@ class RobertaSpanReasoningSingleModel(Model):
 
         output_dict["loss"] = self.loss(masked_node_log_probs, best)
 
-        self._accuracy(node_scores, best)
+        self._accuracy(masked_node_log_probs, best)
         output_dict['cands'] = node_scores
         output_dict['best'] = masked_node_log_probs.argmax(-1)
 
