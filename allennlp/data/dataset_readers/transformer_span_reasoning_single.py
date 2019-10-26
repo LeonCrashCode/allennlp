@@ -446,6 +446,7 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
             ndelchunk += 1
 
         example.doc_chunks = example.doc_chunks[ndelchunk:]
+        example.cands = example.cands[ndelchunk:]
         for chunk in example.doc_chunks:
             chunk[0] -= start_offset
             chunk[1] -= start_offset
@@ -464,9 +465,6 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
                     edges.append(edge)
             example.sentence_graph = edges
 
-            for i in range(len(example.cands)): # candidates
-                assert example.cands[i] < ndelchunk
-                example.cands[i] -= ndelchunk
             for i in range(len(example.best)): #  positives
                 assert example.best[i] < ndelchunk
                 example.best[i] -= ndelchunk
