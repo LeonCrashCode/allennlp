@@ -170,7 +170,7 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
         fields['sentence_graph_edges'] = sentence_graph_edges_field
 
         fields['cands'] = SequenceLabelField(features.cands, chunks_field)
-        fields['best'] = IndexField(features.best[0], chunks_field) 
+        fields['best'] = LabelField(features.best[0],skip_indexing=True) 
 
         metadata = {}
         metadata['qas_id'] = example.qas_id
