@@ -1144,7 +1144,7 @@ class RobertaSpanReasoningSingleModel(Model):
         #print("node_scores", node_scores)
         masks = chunk_mask * cands
 
-        masked_node_scores -= (masks == 0).float() * 1e10
+        masked_node_scores = node_scores - (masks == 0).float() * 1e10
 
         #print("node_scores", node_scores.size())
         #print("node_scores", node_scores)
