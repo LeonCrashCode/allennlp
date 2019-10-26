@@ -1161,8 +1161,7 @@ class RobertaSpanReasoningSingleModel(Model):
         #print(metadata[1]['qas_id'])
         output_dict = {}
 
-        if cands_best[0] >= 0:
-            output_dict["loss"] = self.loss(masked_node_log_probs, best)
+        output_dict["loss"] = self.loss(masked_node_log_probs, best)
 
         self._accuracy(node_scores, best)
         output_dict['cands'] = node_scores
