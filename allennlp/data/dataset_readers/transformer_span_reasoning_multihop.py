@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 # Much of the code is modified from pytorch-transformer examples for SQuAD
 # The treatment of tokens and their string positions is a bit of a mess
 
-@DatasetReader.register("transformer_span_reasoning_single")
-class TransformerSpanReasoningSingleReader(DatasetReader):
+@DatasetReader.register("transformer_span_reasoning_multihop")
+class TransformerSpanReasoningMultihopReader(DatasetReader):
     """
 
     """
@@ -154,44 +154,41 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
         fields['tokens'] = tokens_field
         fields['segment_ids'] = segment_ids_field
         
-        chunks_field = ListField([SpanField(chunk[0], chunk[1], tokens_field) for chunk in features.chunks])
-        sentence_graph_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.sentence_graph_nodes])
-        # sentence_graph_edges_field = ListField([TextField([Token(edge) for edge in edges], self._edge_indexers) for edges in features.sentence_graph_edges])
-        fs = []
-        for edges in features.sentence_graph_edges:
-            if len(edges) == 0:
-                fs.append(TextField([], self._edge_indexers))
-            else:
-                fs.append(TextField([Token(edge) for edge in edges], self._edge_indexers))
-        sentence_graph_edges_field = ListField(fs)
+        # chunks_field = ListField([SpanField(chunk[0], chunk[1], tokens_field) for chunk in features.chunks])
+        # sentence_graph_nodes_field = ListField([ListField([IndexField(n, chunks_field) for n in nodes]) for nodes in features.sentence_graph_nodes])
+        
+        # fs = []
+        # for edges in features.sentence_graph_edges:
+        #     if len(edges) == 0:
+        #         fs.append(TextField([], self._edge_indexers))
+        #     else:
+        #         fs.append(TextField([Token(edge) for edge in edges], self._edge_indexers))
+        # sentence_graph_edges_field = ListField(fs)
 
-        fields['chunks'] = chunks_field
-        fields['sentence_graph_nodes'] = sentence_graph_nodes_field
-        fields['sentence_graph_edges'] = sentence_graph_edges_field
+        # fields['chunks'] = chunks_field
+        # fields['sentence_graph_nodes'] = sentence_graph_nodes_field
+        # fields['sentence_graph_edges'] = sentence_graph_edges_field
 
-        fields['cands'] = SequenceLabelField(features.cands, chunks_field)
-        fields['best'] = LabelField(features.best[0],skip_indexing=True) 
+        fields['b_masks'] = SequenceLabelField(features.b_masks, tokens_field)
+        fields['s_masks'] = SequenceLabelField(features.s_masks, tokens_field)
+        fields['q_masks'] = SequenceLabelField(features.q_masks, tokens_field)
+
+        fields['cands'] = ListField([SpanField(cand[0], cand[1], tokens_field) for cand in features.cands])
+        fields['best'] = LabelField(features.best, skip_indexing=True) 
 
         metadata = {}
         metadata['qas_id'] = example.qas_id
         metadata['cands'] = features.cands
-        metadata['best'] = features.best[0]
+        metadata['best'] = features.best
         if debug > 0:
             logger.info(f"tokens = {features.tokens}")
             logger.info(f"segment_ids = {features.segment_ids}")
-            logger.info(f"chunks = {features.chunks}")
-            logger.info(f"sentence_graph_nodes = {features.sentence_graph_nodes}")
-            logger.info(f"sentence_graph_edges = {features.sentence_graph_edges}")
             logger.info(f"candidates = {features.cands}")
-            logger.info(f"candidates_indice = {[i for i, x in enumerate(features.cands) if x == 1]}")
-            logger.info(f"best= {features.best[0]}")
+            logger.info(f"best= {features.best}")
             candidates_nodes = []
-            for i in [i for i, x in enumerate(features.cands) if x == 1]:
-                s,e = features.chunks[i]
+            for cand in features.cands:
+                s,e = cand
                 candidates_nodes.append(features.tokens[s:e+1])
-            logger.info(f"candidates_nodes = {candidates_nodes}")
-            s,e = features.chunks[features.best[0]]
-            logger.info(f"best_node = {features.tokens[s:e+1]}")
         fields["metadata"] = MetadataField(metadata)
         return Instance(fields)
 
@@ -210,42 +207,50 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
         examples = []
         for entry in input_data:
             for paragraph in entry["paragraphs"]:
-                if self._syntax == "squad":
-                    paragraph_text = paragraph["context"]
-                elif self._syntax == "ropes":
-                    paragraph_text = " ".join(paragraph["background_segs"])
-                else:
-                    raise ValueError(f"Invalid dataset syntax {self._syntax}!")
+                background_text = " ".join(paragraph["background_segs"])
+                # if self._syntax == "squad":
+                #     paragraph_text = paragraph["context"]
+                # elif self._syntax == "ropes":
+                #     paragraph_text = " ".join(paragraph["background_segs"])
+                # else:
+                #     raise ValueError(f"Invalid dataset syntax {self._syntax}!")
 
-                paragraph_text = paragraph_text
-                if self._ignore_main_context:
-                    paragraph_text = ""
-                if self._syntax == "ropes" and not self._ignore_situation_context:
-                        situation_text = " ".join(paragraph["situation_segs"])
-                        situation_text = self._add_prefix.get("s", "") + situation_text
-                        paragraph_text = paragraph_text + " " + situation_text
+                situation_text = " ".join(paragraph["situation_segs"])
+                situation_text = self._add_prefix.get("s", "") + situation_text
+                # if self._ignore_main_context:
+                #     paragraph_text = ""
+                # if self._syntax == "ropes" and not self._ignore_situation_context:
+                #         situation_text = " ".join(paragraph["situation_segs"])
+                #         situation_text = self._add_prefix.get("s", "") + situation_text
+                #         paragraph_text = paragraph_text + " " + situation_text
 
-                doc_tokens = []
+                background_tokens = []
                 prev_is_whitespace = True
-                for c in paragraph_text:
+                for c in background_text:
                     if is_whitespace(c):
                         prev_is_whitespace = True
                     else:
                         if prev_is_whitespace:
-                            doc_tokens.append(c)
+                            background_tokens.append(c)
                         else:
-                            doc_tokens[-1] += c
+                            background_tokens[-1] += c
                         prev_is_whitespace = False
 
+                situation_tokens = []
+                prev_is_whitespace = True
+                for c in situation_text:
+                    if is_whitespace(c):
+                        prev_is_whitespace = True
+                    else:
+                        if prev_is_whitespace:
+                            situation_tokens.append(c)
+                        else:
+                            situation_tokens[-1] += c
+                        prev_is_whitespace = False
 
                 for qa in paragraph["qas"]:
-                    if qa["skip"]:
-                        continue
                     qas_id = qa["id"]
-                    if self._syntax == "ropes":
-                        question_text = qa["question_segs"]
-                    else:
-                        question_text = qa["question"]
+                    question_text = qa["question_segs"]
                     question_text = self._add_prefix.get("q", "") + question_text
                     question_tokens = []
                     prev_is_whitespace = True
@@ -260,42 +265,42 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
                             prev_is_whitespace = False
 
                     
-                    chunks = [[int(x.strip().split()[0]), int(x.strip().split()[1])] for x in qa["offset_spans"].split("|||")]
-                    sents, sentq = qa["bsq_sentence_offsets"].split()[1:]
-                    sents, sentq = int(sents), int(sentq)
-                    sentence_chunk_offsets = qa["sentence_chunk_offsets"].split()
-                    chunkss = int(sentence_chunk_offsets[sents])
-                    chunksq = int(sentence_chunk_offsets[sentq])
+                    # chunks = [[int(x.strip().split()[0]), int(x.strip().split()[1])] for x in qa["offset_spans"].split("|||")]
+                    # sents, sentq = qa["bsq_sentence_offsets"].split()[1:]
+                    # sents, sentq = int(sents), int(sentq)
+                    # sentence_chunk_offsets = qa["sentence_chunk_offsets"].split()
+                    # chunkss = int(sentence_chunk_offsets[sents])
+                    # chunksq = int(sentence_chunk_offsets[sentq])
 
-                    # for item in chunks: #because [CLS] is added in the head of the sentence
+                    # for item in chunks[chunkss:]: #because S: is inserted at the begin of the situation
                     #     item[0] += 1
                     #     item[1] += 1
 
-                    for item in chunks[chunkss:]: #because S: is inserted at the begin of the situation
-                        item[0] += 1
-                        item[1] += 1
+                    # for item in chunks[chunksq:]: #because Q: is inserted at the begin of the question
+                    #     item[0] += 1
+                    #     item[1] += 1
 
-                    for item in chunks[chunksq:]: #because Q: is inserted at the begin of the question
-                        item[0] += 1
-                        item[1] += 1
+                    cands = qa["candidate_spans"].split("|||")
+                    for i, cand in enumerate(cands):
+                        cands[i] = [int(a) for a in cands[i].strip().split()]
+                    best = qa["best"]
 
-                    cands = [ [int(a) for a in qa["positive_nodes"].split()], [int(a) for a in qa["candidate_nodes"].split()]]
+                    # cands = [ [int(a) for a in qa["positive_nodes"].split()], [int(a) for a in qa["candidate_nodes"].split()]]
 
-                    graph = [ [int(x.strip().split()[0]), int(x.strip().split()[1]), x.strip().split()[2]] for x in qa["deps"].split("|||")]
+                    # graph = [ [int(x.strip().split()[0]), int(x.strip().split()[1]), x.strip().split()[2]] for x in qa["deps"].split("|||")]
 
 
                     example = SpanPredictionExample(
                         qas_id=qas_id,
-                        doc_text=paragraph_text,
-                        doc_tokens=doc_tokens,
-                        doc_chunks=chunks[:chunksq],
+                        b_text=background_text,
+                        b_tokens=background_tokens,
+                        s_text=situation_text,
+                        s_tokens=situation_tokens,
                         q_text = question_text,
                         q_tokens=question_tokens,
-                        q_chunks=chunks[chunksq:],
-                        cands=cands[1],
-                        sentence_graph=graph,
-                        best=cands[0],
-                        is_impossible=qa["skip"])
+                        cands=cands,
+                        best=best,
+                        is_impossible=False)
                     examples.append(example)
                     if self._sample > 0 and len(examples) > self._sample:
                         return examples
@@ -371,227 +376,239 @@ class TransformerSpanReasoningSingleReader(DatasetReader):
         sequence_a_segment_id = 0
         sequence_b_segment_id = 1
 
-        tok_to_orig_index = []
-        orig_to_tok_index = []
-        all_doc_tokens = []
-        for (i, token) in enumerate(example.doc_tokens):
-            orig_to_tok_index.append(len(all_doc_tokens))
+        b_tok_to_orig_index = []
+        b_orig_to_tok_index = []
+        all_b_tokens = []
+        for (i, token) in enumerate(example.b_tokens):
+            b_orig_to_tok_index.append(len(all_b_tokens))
             sub_tokens = self._tokenizer.tokenize(token)
             for sub_token in sub_tokens:
-                tok_to_orig_index.append(i)
-                all_doc_tokens.append(sub_token)
+                b_tok_to_orig_index.append(i)
+                all_b_tokens.append(sub_token)
+
+        s_tok_to_orig_index = []
+        s_orig_to_tok_index = []
+        all_s_tokens = []
+        for (i, token) in enumerate(example.s_tokens):
+            s_orig_to_tok_index.append(len(all_s_tokens))
+            sub_tokens = self._tokenizer.tokenize(token)
+            for sub_token in sub_tokens:
+                s_tok_to_orig_index.append(i)
+                all_s_tokens.append(sub_token)
 
         q_tok_to_orig_index = []
         q_orig_to_tok_index = []
-        all_query_tokens = []
+        all_q_tokens = []
         for (i, token) in enumerate(example.q_tokens):
-            q_orig_to_tok_index.append(len(all_query_tokens))
+            q_orig_to_tok_index.append(len(all_q_tokens))
             sub_tokens = self._tokenizer.tokenize(token)
             for sub_token in sub_tokens:
                 q_tok_to_orig_index.append(i)
-                all_query_tokens.append(sub_token)
+                all_q_tokens.append(sub_token)
 
-        # print(len(all_doc_tokens))
-        # print(all_doc_tokens)
-        # print(all_doc_tokens[450:])
-        # print(len(all_query_tokens))
-        # print(all_query_tokens)
+        position = []
+        for cand in example.cands:
+            position.append([0, 0])
+            for i in range(2):
+                if cand[i] < len(example.b_tokens):
+                    cand[i] = b_orig_to_tok_index[cand[i]]
+                    position[-1][i] = 1
+                elif cand[i] < len(example.s_tokens) + len(example.b_tokens):
+                    cand[i] = s_orig_to_tok_index[cand[i] - len(example.b_tokens)] + len(b_tok_to_orig_index)
+                    position[-1][i] = 1
+                else:
+                    cand[i] = q_orig_to_tok_index[cand[i] - len(example.b_tokens) - len(example.s_tokens)] + len(b_tok_to_orig_index) + len(s_tok_to_orig_index)
+                    position[-1][i] = 2
+        # for chunk in example.doc_chunks:
+        #     s, e = chunk
+        #     chunk[0] = orig_to_tok_index[s]
+        #     chunk[1] = orig_to_tok_index[e + 1] - 1 if e + 1 < len(orig_to_tok_index) else len(all_doc_tokens) - 1
 
-
-
-        # print(orig_to_tok_index)
-        # print(len(orig_to_tok_index))
-        # print(f"before example.doc_chunks : {example.doc_chunks}")
-        for chunk in example.doc_chunks:
-            s, e = chunk
-            chunk[0] = orig_to_tok_index[s]
-            chunk[1] = orig_to_tok_index[e + 1] - 1 if e + 1 < len(orig_to_tok_index) else len(all_doc_tokens) - 1
-
-        # print(f"example.doc_chunks : {example.doc_chunks}")
-        # print(len(all_doc_tokens))
-
-        # print(f"before example.q_chunks : {example.q_chunks}")
-        for chunk in example.q_chunks:
-            s, e = chunk
-            chunk[0] = q_orig_to_tok_index[s - len(orig_to_tok_index)] + len(all_doc_tokens)
-            chunk[1] = q_orig_to_tok_index[e + 1 - len(orig_to_tok_index)] - 1 + len(all_doc_tokens) if  e + 1 - len(orig_to_tok_index) < len(q_orig_to_tok_index) else len(all_doc_tokens) + len(all_query_tokens) - 1
+        # for chunk in example.q_chunks:
+        #     s, e = chunk
+        #     chunk[0] = q_orig_to_tok_index[s - len(orig_to_tok_index)] + len(all_doc_tokens)
+        #     chunk[1] = q_orig_to_tok_index[e + 1 - len(orig_to_tok_index)] - 1 + len(all_doc_tokens) if  e + 1 - len(orig_to_tok_index) < len(q_orig_to_tok_index) else len(all_doc_tokens) + len(all_query_tokens) - 1
 
         # print(f"example.q_chunks : {example.q_chunks}")
-        if len(all_query_tokens) > self._max_pieces:
+        if len(all_q_tokens) + len(all_s_tokens) > self._max_pieces:
             assert False, "not allowed"
             # all_query_tokens = all_query_tokens[0:self._max_pieces]
 
-        tokens = all_doc_tokens + all_query_tokens
+        tokens = all_b_tokens + all_s_tokens + all_q_tokens
         # The -3 accounts for [CLS], [SEP] and [SEP]
 
         # print(f"max_pieces : {self._max_pieces}")
-        max_tokens_for_doc = self._max_pieces - len(all_query_tokens) - 3
+        max_tokens_for_b = self._max_pieces - len(all_s_tokens) - len(all_q_tokens) - 3
 
         # here we need to recover the spans true index of candidates
         _DocSpan = collections.namedtuple(  # pylint: disable=invalid-name
             "DocSpan", ["start", "length"])
-        doc_spans = []
+        b_spans = []
         start_offset = 0
-        while start_offset < len(all_doc_tokens):
-            length = len(all_doc_tokens) - start_offset
-            if length > max_tokens_for_doc:
-                length = max_tokens_for_doc
-            doc_spans.append(_DocSpan(start=start_offset, length=length))
-            if start_offset + length == len(all_doc_tokens):
+        while start_offset < len(all_b_tokens):
+            length = len(all_b_tokens) - start_offset
+            if length > max_tokens_for_b:
+                length = max_tokens_for_b
+            b_spans.append(_DocSpan(start=start_offset, length=length))
+            if start_offset + length == len(all_b_tokens):
                 break
             start_offset += min(length, self._doc_stride)
 
 
 
         start_offset = 0
-        if len(all_doc_tokens) > max_tokens_for_doc:
-            start_offset = len(all_doc_tokens) - max_tokens_for_doc
-            all_doc_tokens = all_doc_tokens[-max_tokens_for_doc:]
+        if len(all_b_tokens) > max_tokens_for_b:
+            start_offset = len(all_b_tokens) - max_tokens_for_b
+            all_b_tokens = all_b_tokens[-max_tokens_for_b:]
+
+        for cand in example.cands:
+            cand[0] -= start_offset
+            cand[1] -= start_offset
             
-        ndelchunk = 0
-        for chunk in example.doc_chunks:
-            if chunk[0] >= start_offset:
-                break
-            ndelchunk += 1
 
-        example.doc_chunks = example.doc_chunks[ndelchunk:]
-        for chunk in example.doc_chunks:
-            chunk[0] -= start_offset
-            chunk[1] -= start_offset
-        for chunk in example.q_chunks:
-            chunk[0] -= start_offset
-            chunk[1] -= start_offset
-
-        if ndelchunk != 0:
-            edges = []
-            for edge in example.sentence_graph:
-                if edge[0] < ndelchunk or edge[1] < ndelchunk:
-                    pass
-                else:
-                    edge[0] -= ndelchunk
-                    edge[1] -= ndelchunk
-                    edges.append(edge)
-            example.sentence_graph = edges
-
-            for i in range(len(example.cands)):
-                assert example.cands[i] >= ndelchunk
-                example.cands[i] -= ndelchunk 
-            for i in range(len(example.best)): #  positives
-                assert example.best[i] >= ndelchunk
-                example.best[i] -= ndelchunk
-
-        # print(f"window example.doc_chunks : {example.doc_chunks}")
-        # print(f"window example.q_chunks : {example.q_chunks}")
-
-        # We can have documents that are longer than the maximum sequence length.
-        # # To deal with this we do a sliding window approach, where we take chunks
-        # # of the up to our max length with a stride of `doc_stride`.
-        # _DocSpan = collections.namedtuple(  # pylint: disable=invalid-name
-        #     "DocSpan", ["start", "length"])
-        # doc_spans = []
-        # start_offset = 0
-        # while start_offset < len(all_doc_tokens):
-        #     length = len(all_doc_tokens) - start_offset
-        #     if length > max_tokens_for_doc:
-        #         length = max_tokens_for_doc
-        #     doc_spans.append(_DocSpan(start=start_offset, length=length))
-        #     if start_offset + length == len(all_doc_tokens):
+        # ndelchunk = 0
+        # for chunk in example.doc_chunks:
+        #     if chunk[0] >= start_offset:
         #         break
-        #     start_offset += min(length, self._doc_stride)
+        #     ndelchunk += 1
 
-        # features_list = []
+        # example.doc_chunks = example.doc_chunks[ndelchunk:]
+        # for chunk in example.doc_chunks:
+        #     chunk[0] -= start_offset
+        #     chunk[1] -= start_offset
+        # for chunk in example.q_chunks:
+        #     chunk[0] -= start_offset
+        #     chunk[1] -= start_offset
+
+        # if ndelchunk != 0:
+        #     edges = []
+        #     for edge in example.sentence_graph:
+        #         if edge[0] < ndelchunk or edge[1] < ndelchunk:
+        #             pass
+        #         else:
+        #             edge[0] -= ndelchunk
+        #             edge[1] -= ndelchunk
+        #             edges.append(edge)
+        #     example.sentence_graph = edges
+
+        #     for i in range(len(example.cands)):
+        #         assert example.cands[i] >= ndelchunk
+        #         example.cands[i] -= ndelchunk 
+        #     for i in range(len(example.best)): #  positives
+        #         assert example.best[i] >= ndelchunk
+        #         example.best[i] -= ndelchunk
+
+
+        b_masks = []
+        s_masks = []
+        q_masks = []
         tokens = []
         segment_ids = []
         if not cls_token_at_end:
             tokens.append(cls_token)
             segment_ids.append(cls_token_segment_id)
             cls_index = 0
-            for chunk in example.doc_chunks:
-                chunk[0] += 1
-                chunk[1] += 1
-            for chunk in example.q_chunks:
-                chunk[0] += 2
-                chunk[1] += 2
+            for cand, p in zip(example.cands, position):
+                cand[0] += p[0]
+                cand[1] += p[1]
+            b_masks += [0]
+            s_masks += [0]
+            q_masks += [0]
 
-        tokens += all_doc_tokens
-        segment_ids += [sequence_a_segment_id] * len(all_doc_tokens)
+            # for chunk in example.doc_chunks:
+            #     chunk[0] += 1
+            #     chunk[1] += 1
+            # for chunk in example.q_chunks:
+            #     chunk[0] += 2
+            #     chunk[1] += 2
+
+        tokens += all_b_tokens
+        segment_ids += [sequence_a_segment_id] * len(all_b_tokens)
+        b_masks += [1] * len(all_b_tokens)
+        s_masks += [0] * len(all_b_tokens)
+        q_masks += [0] * len(all_b_tokens)
+
+        tokens += all_s_tokens
+        segment_ids += [sequence_a_segment_id] * len(all_s_tokens)
+        b_masks += [0] * len(all_s_tokens)
+        s_masks += [1] * len(all_s_tokens)
+        q_masks += [0] * len(all_s_tokens)
 
         tokens.append(sep_token)
         segment_ids.append(sequence_a_segment_id)
+        b_masks += [0]
+        s_masks += [0]
+        q_masks += [0]
 
-        tokens += all_query_tokens
-        segment_ids += [sequence_b_segment_id] * len(all_query_tokens)
+        tokens += all_q_tokens
+        segment_ids += [sequence_b_segment_id] * len(all_q_tokens)
+        b_masks += [0] * len(all_q_tokens)
+        s_masks += [0] * len(all_q_tokens)
+        q_masks += [1] * len(all_q_tokens)
 
         if cls_token_at_end:
             tokens.append(cls_token)
             segment_ids.append(cls_token_segment_id)
             cls_index = len(tokens) - 1  # Inde
-            for chunk in example.q_chunks:
-                chunk[0] += 1
-                chunk[1] += 1
+            for cand, p in zip(example.cands, position):
+                cand[0] += (p[0] - 1)
+                cand[1] += (p[1] - 1)
+            b_masks += [0]
+            s_masks += [0]
+            q_masks += [0]
+            # for chunk in example.q_chunks:
+            #     chunk[0] += 1
+            #     chunk[1] += 1
 
-        # corefs
-        # corefs = []
-        # for coref in example.corefs:
-        #     corefs.append(tuple(coref))
-        # corefs_label = ["coref"] * len(example.corefs)
-
-        # chunks
-        chunks = []
-        for chunk in example.doc_chunks:
-            chunks.append(tuple(chunk))
-        for chunk in example.q_chunks:
-            chunks.append(tuple(chunk))
+        # chunks = []
+        # for chunk in example.doc_chunks:
+        #     chunks.append(tuple(chunk))
+        # for chunk in example.q_chunks:
+        #     chunks.append(tuple(chunk))
 
             
 
         #setence graph
-        sentence_graph_nodes = [ [] for _ in range(len(chunks))]
-        sentence_graph_edges = [ [] for _ in range(len(chunks))]
-        for item in example.sentence_graph:
-            sentence_graph_nodes[item[0]].append(item[1])
-            sentence_graph_edges[item[0]].append(item[2])
+        # sentence_graph_nodes = [ [] for _ in range(len(chunks))]
+        # sentence_graph_edges = [ [] for _ in range(len(chunks))]
+        # for item in example.sentence_graph:
+        #     sentence_graph_nodes[item[0]].append(item[1])
+        #     sentence_graph_edges[item[0]].append(item[2])
 
-        for item in sentence_graph_nodes:
-            if len(item) == 0:
-                item.append(-1)
-        # for item in sentence_graph_edges:
+        # for item in sentence_graph_nodes:
         #     if len(item) == 0:
-        #         item.append("None")
+        #         item.append(-1)
 
         
-        cands = [ 0 for _  in range(len(chunks))]
-        for cand in example.cands:
-            cands[cand] = 1
-        # for chunk in example.doc_chunks:
-        #     print(tokens[chunk[0]:chunk[1]+1])
-        # for chunk in example.q_chunks:
-        #     print(tokens[chunk[0]:chunk[1]+1])
-        # for i in example.cands:
-        #     print(tokens[chunks[i][0]:chunks[i][1]+1])
-        # for i in example.best:
-        #     print(tokens[chunks[i][0]:chunks[i][1]+1])
+        # cands = [ 0 for _  in range(len(chunks))]
+        # for cand in example.cands:
+        #     cands[cand] = 1
 
         if debug > 0:
             logger.info("*** Features ***")
             logger.info(f"unique_id: {example.qas_id}")
             logger.info(f"tokens: {tokens}")
+            logger.info(f"b_masks: {b_masks}")
+            logger.info(f"s_masks: {s_masks}")
+            logger.info(f"q_masks: {q_masks}")
             logger.info("segment_ids: %s" % " ".join([str(x) for x in segment_ids]))
-            logger.info(f"chunks: {chunks}" )
-            logger.info(f"sentence_graph_nodes: {sentence_graph_nodes}" )
-            logger.info(f"sentence_graph_edges: {sentence_graph_edges}" )
-            logger.info(f"cands: {cands}" )
+            logger.info(f"cands: {example.cands}" )
             logger.info(f"cands_best: {example.best}")
+            spans = []
+            for cand in example.cands:
+                s, e = cand
+                spans.append(tokens[s:e+1])
+            logger.info(f"cands_spans: {spans}")
 
         return InputFeatures(
                     unique_id=example.qas_id,
                     tokens=tokens,
+                    b_masks=b_masks,
+                    s_masks=s_masks,
+                    q_masks=q_masks,
                     segment_ids=segment_ids,
                     cls_index=cls_index,
-                    chunks=chunks,
-                    sentence_graph_nodes=sentence_graph_nodes,
-                    sentence_graph_edges=sentence_graph_edges,
-                    cands=cands,
+                    cands=example.cands,
                     best=example.best
                     )
         # Just filter away impossible/missing spans for now (this uses labels, so not fair on dev/test):
@@ -631,25 +648,23 @@ class SpanPredictionExample(object):
     """
     def __init__(self,
                 qas_id,
-                doc_text,
-                doc_tokens,
-                doc_chunks,
+                b_text,
+                b_tokens,
+                s_text,
+                s_tokens,
                 q_text,
                 q_tokens,
-                q_chunks,
                 cands,
-                sentence_graph,
                 best,
                 is_impossible=None):
         self.qas_id = qas_id
-        self.doc_text = doc_text
-        self.doc_tokens = doc_tokens
-        self.doc_chunks = doc_chunks
+        self.b_text = b_text
+        self.b_tokens = b_tokens
+        self.s_text = s_text
+        self.s_tokens = s_tokens
         self.q_text = q_text
         self.q_tokens = q_tokens
-        self.q_chunks = q_chunks
         self.cands = cands
-        self.sentence_graph = sentence_graph
         self.best = best
         self.is_impossible = is_impossible
 
@@ -659,12 +674,11 @@ class SpanPredictionExample(object):
     def __repr__(self):
         s = ""
         s += "  qas_id: %s" % (self.qas_id)
-        s += "\n  doc_tokens: [%s]" % (" ".join(self.doc_tokens))
-        s += f"\n  doc_chunks: {self.doc_chunks}"
+        s += "\n  b_tokens: [%s]" % (" ".join(self.b_tokens))
+        s += "\n  s_tokens: [%s]" % (" ".join(self.s_tokens))
         s += "\n  q_tokens: [%s]" % (" ".join(self.q_tokens))
-        s += f"\n  q_chunks: {self.q_chunks}"
-        s += f"\n. sentence_graph: {self.sentence_graph}"
         s += f"\n. cands: {self.cands}"
+        s += f"\n. best: {self.best}"
         if self.is_impossible:
             s += "\n  is_impossible: %r" % (self.is_impossible)
         return s
@@ -675,11 +689,11 @@ class InputFeatures(object):
     def __init__(self,
                 unique_id,
                 tokens,
+                b_masks,
+                s_masks,
+                q_masks,
                 segment_ids,
                 cls_index,
-                chunks,
-                sentence_graph_nodes,
-                sentence_graph_edges,
                 cands,
                 best):
     # def __init__(self,
@@ -702,11 +716,11 @@ class InputFeatures(object):
         self.tokens = tokens
         self.segment_ids = segment_ids
         self.cls_index = cls_index
-        self.chunks = chunks
-        self.sentence_graph_nodes=sentence_graph_nodes
-        self.sentence_graph_edges = sentence_graph_edges
         self.cands = cands
         self.best = best
+        self.b_masks = b_masks
+        self.s_masks = s_masks
+        self.q_masks = q_masks
 
 
 def whitespace_tokenize(text):
