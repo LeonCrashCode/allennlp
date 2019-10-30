@@ -1428,7 +1428,7 @@ class RobertaSpanReasoningMultihopModel(Model):
         if metadata is not None:
             output_dict["qid"] = []
             for i in range(batch_size):
-                output_dict["qid"].append(metadata['qas_id'])
+                output_dict["qid"].append(metadata[i]['qas_id'])
 
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
