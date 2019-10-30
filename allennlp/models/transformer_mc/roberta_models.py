@@ -1425,7 +1425,10 @@ class RobertaSpanReasoningMultihopModel(Model):
         output_dict["best"] = scores.argmax(-1)
         output_dict["scores"] = scores
         output_dict["log_probs"] = log_probs
-
+        if metadata is not None:
+            output_dict["qid"] = []
+            for i in range(batch_size):
+                output_dict["qid"].append(metadata['qas_id'])
 
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
