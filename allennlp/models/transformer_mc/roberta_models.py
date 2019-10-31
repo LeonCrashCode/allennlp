@@ -18,6 +18,7 @@ from allennlp.nn import RegularizerApplicator, util
 from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1, F1Measure, FBetaMeasure
 from allennlp.modules.token_embedders import Embedding
 from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor, EndpointSpanExtractor
+from allennlp.modules.positional_encoding import PositionalEncoding
 
 from allennlp.nn.util import batched_index_select
 @Model.register("roberta_mc_qa")
@@ -1241,12 +1242,12 @@ class RobertaSpanReasoningMultihopModel(Model):
     def __init__(self,
                  vocab: Vocabulary,
                  #span_extractor: SpanExtractor,
-                 gnn_nonlinear: str = "tanh",
-                 gnn_step: int = 2,
+                 position_info: str=None,
                  pretrained_model: str = None,
                  requires_grad: bool = True,
                  transformer_weights_model: str = None,
                  layer_freeze_regexes: List[str] = None,
+                 dropout: float = 0,
                  on_load: bool = False,
                  regularizer: Optional[RegularizerApplicator] = None) -> None:
         super().__init__(vocab, regularizer)
@@ -1271,28 +1272,18 @@ class RobertaSpanReasoningMultihopModel(Model):
 
         transformer_config = self._transformer_model.config
 
-        self.embedder = Embedding(
-                            num_embeddings=vocab.get_vocab_size('edges'),
-                            embedding_dim=transformer_config.hidden_size*2,
-                            padding_index=0)
-
         self.Q_mlp = Linear(transformer_config.hidden_size, 1)
         self.B_mlp = Linear(transformer_config.hidden_size, 1)
         self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
         self.scorer = Linear(transformer_config.hidden_size*6, 1)
 
         self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
+        self.dropout = torch.nn.Dropout(p=dropout)
 
-        if gnn_nonlinear == "tanh":
-            self.nonlinear = torch.nn.Tanh()
-        elif gnn_nonlinear == "relu":
-            self.nonlinear = torch.nn.ReLU()
+        if position_info:
+            self.positional_encoding = PositionalEncoding(dropout=0.2, dim=transformer_config.hidden_size*2, max_len=10)
         else:
-            self.nonlinear = torch.nn.Tanh()
-
-
-        self.deep = gnn_step
-        self.score_outputs = Linear(transformer_config.hidden_size*2, 1)
+            self.positional_encoding = None
         self.loss = torch.nn.NLLLoss()
 
         # Import GTP2 machinery to get from tokens to actual text
@@ -1311,6 +1302,7 @@ class RobertaSpanReasoningMultihopModel(Model):
                 s_masks: torch.LongTensor = None,
                 q_masks: torch.LongTensor = None,
                 cands: torch.LongTensor = None,
+                cands_indices: torch.LongTensor = None,
                 best: torch.LongTensor = None,
                 metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
 
@@ -1362,6 +1354,7 @@ class RobertaSpanReasoningMultihopModel(Model):
         #print("Q_attn", Q_attn)
         #print("Q_attn", Q_attn.size())
         Q_reps = torch.bmm(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
+        Q_reps = self.dropout(Q_reps)
         #print("Q_reps", Q_reps)
         #print("Q_reps", Q_reps.size())
 
@@ -1396,13 +1389,22 @@ class RobertaSpanReasoningMultihopModel(Model):
         #print("B_attn2", B_attn2.size())
 
         #get S_attn
-        B_reps1 = torch.bmm(B_attn1.unsqueeze(1), sequence_output).expand(-1, cands_num, -1)
-        B_reps2 = torch.bmm(B_attn2.unsqueeze(1), sequence_output).expand(-1, cands_num, -1)
+        B_reps1 = torch.bmm(B_attn1.unsqueeze(1), sequence_output)
+        B_reps1 = self.dropout(B_reps1).expand(-1, cands_num, -1)
+
+        B_reps2 = torch.bmm(B_attn2.unsqueeze(1), sequence_output)
+        B_reps2 = self.dropout(B_reps2).expand(-1, cands_num, -1)
 
         cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
+        if self.positional_encoding:
+            cands_reps = self.positional_encoding(cands_reps)
+        else:
+            cands_reps = self.dropout(cands_reps)
+        
         
         CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
         CB_reps = self.CB_mlp(CB_reps)
+        CB_reps = self.dropout(CB_reps)
 
         S_weights = torch.bmm(CB_reps, sequence_output.transpose(1,2))
         s_masks = s_masks.unsqueeze(1).expand(-1, cands_num, -1)
@@ -1412,6 +1414,7 @@ class RobertaSpanReasoningMultihopModel(Model):
 
         #score candidates
         S_reps = torch.bmm(S_attn, sequence_output)
+        S_reps = self.dropout(S_reps)
         reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         scores = self.scorer(reps).squeeze(-1)
         #print("scores", scores)
@@ -1429,7 +1432,7 @@ class RobertaSpanReasoningMultihopModel(Model):
             output_dict["qid"] = []
             for i in range(batch_size):
                 output_dict["qid"].append(metadata[i]['qas_id'])
-
+        
         # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
         # if metadata is not None:
         #     output_dict['best_span_str'] = []
