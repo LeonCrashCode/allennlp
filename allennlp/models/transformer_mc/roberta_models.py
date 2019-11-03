@@ -1274,14 +1274,17 @@ class RobertaSpanReasoningMultihopModel(Model):
 
         transformer_config = self._transformer_model.config
 
-        self.Q_mlp = Linear(transformer_config.hidden_size, 1)
-        self.B_mlp = Linear(transformer_config.hidden_size, 1)
-        self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
-        self.scorer = Linear(transformer_config.hidden_size*6, 1)
+        if simple:
+            self.scorer = Linear(transformer_config.hidden_size*2,1)
+        else:
+            self.Q_mlp = Linear(transformer_config.hidden_size, 1)
+            self.B_mlp = Linear(transformer_config.hidden_size, 1)
+            self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
+            self.scorer = Linear(transformer_config.hidden_size*6, 1)
 
-        self.B1_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
-        self.B2_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
-        self.S_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+            self.B1_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+            self.B2_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+            self.S_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
 
         self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
         self.dropout = torch.nn.Dropout(p=dropout)
@@ -1291,8 +1294,7 @@ class RobertaSpanReasoningMultihopModel(Model):
         else:
             self.positional_encoding = None
 
-        if simple:
-            self.scorer = Linear(transformer_config.hidden_size*2,1)
+        
         self.loss = torch.nn.NLLLoss()
 
         # Import GTP2 machinery to get from tokens to actual text
