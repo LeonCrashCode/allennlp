@@ -1273,7 +1273,7 @@ class RobertaSpanReasoningMultihopModel(Model):
             param.requires_grad = grad
 
         transformer_config = self._transformer_model.config
-
+        self.simple = simple
         if simple:
             self.scorer = Linear(transformer_config.hidden_size*2,1)
         else:
@@ -1356,7 +1356,7 @@ class RobertaSpanReasoningMultihopModel(Model):
                                                       attention_mask=tokens_mask)
         sequence_output = transformer_outputs[0]
 
-        if simple:
+        if self.simple:
             cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
             if self.positional_encoding:
                 cands_reps = self.positional_encoding(cands_reps)
