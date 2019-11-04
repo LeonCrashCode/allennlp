@@ -1478,6 +1478,8 @@ class RobertaSpanReasoningMultihopModel(Model):
                 reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
             elif self.ablation == 2: # no b2 s
                 reps = torch.cat((cands_reps, B_reps1, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+            else:
+                reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
 
             scores = self.scorer(reps).squeeze(-1)
         #print("scores", scores)
