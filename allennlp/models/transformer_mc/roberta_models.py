@@ -1249,8 +1249,7 @@ class RobertaSpanReasoningMultihopModel(Model):
                  transformer_weights_model: str = None,
                  layer_freeze_regexes: List[str] = None,
                  dropout: float = 0,
-                 simple: str = None,
-                 ablation: int = 0,
+                 ablation: str = "all",
                  on_load: bool = False,
                  regularizer: Optional[RegularizerApplicator] = None) -> None:
         super().__init__(vocab, regularizer)
@@ -1274,28 +1273,15 @@ class RobertaSpanReasoningMultihopModel(Model):
             param.requires_grad = grad
 
         transformer_config = self._transformer_model.config
-        self.simple = simple
         self.ablation = ablation
-        if simple:
-            self.scorer = Linear(transformer_config.hidden_size*2,1)
-        else:
-            self.Q_mlp = Linear(transformer_config.hidden_size, 1)
-            self.B_mlp = Linear(transformer_config.hidden_size, 1)
-            if self.ablation == 1:
-                self.CB_mlp = Linear(transformer_config.hidden_size*3, transformer_config.hidden_size)
-            else:
-                self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
+        self.Q_mlp = Linear(transformer_config.hidden_size, 1)
+        self.B_mlp = Linear(transformer_config.hidden_size, 1)
+        self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
+        self.B1_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+        self.B2_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+        self.S_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
 
-            if self.ablation == 1:
-                self.scorer = Linear(transformer_config.hidden_size*5, 1)
-            elif self.ablation == 2:
-                self.scorer = Linear(transformer_config.hidden_size*4, 1)
-            else:
-                self.scorer = Linear(transformer_config.hidden_size*6, 1)
-
-            self.B1_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
-            self.B2_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
-            self.S_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+        self.scorer = Linear(transformer_config.hidden_size*(6-self.ablation),1)
 
         self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
         self.dropout = torch.nn.Dropout(p=dropout)
@@ -1447,10 +1433,7 @@ class RobertaSpanReasoningMultihopModel(Model):
             else:
                 cands_reps = self.dropout(cands_reps)
 
-            if self.ablation == 1:            
-                CB_reps = torch.cat((cands_reps, B_reps1), dim=-1)
-            else:
-                CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
+            CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
             CB_reps = self.CB_mlp(CB_reps)
 
             #B x cands_num x Dim
@@ -1474,11 +1457,15 @@ class RobertaSpanReasoningMultihopModel(Model):
 
             # STEP5, SCORE
 
-            if self.ablation == 1: # no b2
-                reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-            elif self.ablation == 2: # no b2 s
+            if self.ablation == 4: #
+                reps = conds_reps
+            elif self.ablation == 3: #q
+                reps = torch.cat((cands_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+            elif self.ablation == 2: #q b1
                 reps = torch.cat((cands_reps, B_reps1, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-            else:
+            elif self.ablation == 1: #q b1 b2
+                reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+            else: #q b1 b2 s
                 reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
 
             scores = self.scorer(reps).squeeze(-1)
