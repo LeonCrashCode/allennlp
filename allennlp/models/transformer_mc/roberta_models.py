@@ -1455,7 +1455,7 @@ class RobertaSpanReasoningMultihopModel(Model):
         # STEP5, SCORE
 
         if self.ablation == 4: #
-            reps = conds_reps
+            reps = cands_reps
         elif self.ablation == 3: #q
             reps = torch.cat((cands_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         elif self.ablation == 2: #q b1
