@@ -1353,122 +1353,119 @@ class RobertaSpanReasoningMultihopModel(Model):
                                                       attention_mask=tokens_mask)
         sequence_output = transformer_outputs[0]
 
-        if self.simple:
-            cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
-            if self.positional_encoding:
-                cands_reps = self.positional_encoding(cands_reps)
-            else:
-                cands_reps = self.dropout(cands_reps)
-            scores = self.scorer(cands_reps).squeeze(-1)
+        cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
+        if self.positional_encoding:
+            cands_reps = self.positional_encoding(cands_reps)
         else:
-            # STEP1, get Q_attn and Q_reps
-            #print("Get Q_attn and Q_reps")
-            Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
-            Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
-            Q_attn = torch.softmax(Q_weights, dim=-1)
-            #print("Q_attn", Q_attn)
-            #print("Q_attn", Q_attn.size())
-            Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
-            Q_reps = self.dropout(Q_reps)
-            #print("Q_reps", Q_reps)
-            #print("Q_reps", Q_reps.size())
+            cands_reps = self.dropout(cands_reps)
+        # STEP1, get Q_attn and Q_reps
+        #print("Get Q_attn and Q_reps")
+        Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
+        Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
+        Q_attn = torch.softmax(Q_weights, dim=-1)
+        #print("Q_attn", Q_attn)
+        #print("Q_attn", Q_attn.size())
+        Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
+        Q_reps = self.dropout(Q_reps)
+        #print("Q_reps", Q_reps)
+        #print("Q_reps", Q_reps.size())
 
-            # STEP2, get B_attn1
-            #print("Get B_attn1")
+        # STEP2, get B_attn1
+        #print("Get B_attn1")
 
-            # B x 1 x Dim, B x 1 x L
-            B_reps1, B_attn1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
-            B_reps1 = self.dropout(B_reps1)
-            # B_weights1 = torch.bmm(Q_reps.unsqueeze(1), sequence_output.transpose(1,2)).squeeze(1)
+        # B x 1 x Dim, B x 1 x L
+        B_reps1, B_attn1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
+        B_reps1 = self.dropout(B_reps1)
+        # B_weights1 = torch.bmm(Q_reps.unsqueeze(1), sequence_output.transpose(1,2)).squeeze(1)
 
-            # norm = torch.norm(B_weights1, dim=-1, keepdim=True) # the weights are too large
-            # B_weights1 = B_weights1.div(norm)
-            # #print("B_weights1", B_weights1)
-            # #print("B_weights1.size()", B_weights1.size())
-            # B_weights1 -= (b_masks == 0).float() * 1e25
-            # #print("B_weights1", B_weights1)
-            # B_attn1 = torch.softmax(B_weights1, dim=-1) * b_masks.float()
-            # #print("B_attn1", B_attn1)
-            # #print("B_attn1", B_attn1.size())
+        # norm = torch.norm(B_weights1, dim=-1, keepdim=True) # the weights are too large
+        # B_weights1 = B_weights1.div(norm)
+        # #print("B_weights1", B_weights1)
+        # #print("B_weights1.size()", B_weights1.size())
+        # B_weights1 -= (b_masks == 0).float() * 1e25
+        # #print("B_weights1", B_weights1)
+        # B_attn1 = torch.softmax(B_weights1, dim=-1) * b_masks.float()
+        # #print("B_attn1", B_attn1)
+        # #print("B_attn1", B_attn1.size())
 
-            # STEP3, get B_attn2
-            #print("Get B_attn2")
+        # STEP3, get B_attn2
+        #print("Get B_attn2")
 
-            sb_masks = torch.matmul(s_masks.float().unsqueeze(2), b_masks.float().unsqueeze(1))
+        sb_masks = torch.matmul(s_masks.float().unsqueeze(2), b_masks.float().unsqueeze(1))
 
-            # B x L x Dim, B x L x L
-            B_reps2, B_attn2 = self.B2_multi_head_attention(key=B_attn1.transpose(1,2).expand(-1,-1,sequence_output.size(-1)) * sequence_output, value=sequence_output, query=sequence_output, mask=sb_masks)
-            
-            B_weights2 = self.B_mlp(B_reps2).squeeze(-1)
-            B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
-            B_attn2 = torch.softmax(B_weights2, dim=-1)
-            B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
-            # B x 1 x Dim
-            B_reps2 = self.dropout(B_reps2)
+        # B x L x Dim, B x L x L
+        B_reps2, B_attn2 = self.B2_multi_head_attention(key=B_attn1.transpose(1,2).expand(-1,-1,sequence_output.size(-1)) * sequence_output, value=sequence_output, query=sequence_output, mask=sb_masks)
+        
+        B_weights2 = self.B_mlp(B_reps2).squeeze(-1)
+        B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
+        B_attn2 = torch.softmax(B_weights2, dim=-1)
+        B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
+        # B x 1 x Dim
+        B_reps2 = self.dropout(B_reps2)
 
-            # key = B_attn1.unsqueeze(2).expand(-1, -1, sequence_output.size(2)) * sequence_output
-            # query = sequence_output
-            # weights = torch.bmm(key, query.transpose(1,2))
-            # matrix_mask = torch.bmm(b_masks.float().unsqueeze(2).expand(-1, -1, sequence_output.size(2)), s_masks.float().unsqueeze(2).expand(-1, -1, sequence_output.size(2)).transpose(1,2))
-            # weights -= (matrix_mask <= 0).float() * 1e25
-            # attn = torch.softmax(weights, dim=-1) * (matrix_mask > 0).float()
-            
-            # value = sequence_output
-            # B_weights2 = torch.bmm(attn, value)
-            # B_weights2 = self.B_mlp(B_weights2).squeeze(-1)
-            # B_weights2 -= (b_masks == 0).float() * 1e25
-            # B_attn2 = torch.softmax(B_weights2, dim=-1) * b_masks.float()
-            # #print(B_attn2)
-            # #print("B_attn2", B_attn2.size())
+        # key = B_attn1.unsqueeze(2).expand(-1, -1, sequence_output.size(2)) * sequence_output
+        # query = sequence_output
+        # weights = torch.bmm(key, query.transpose(1,2))
+        # matrix_mask = torch.bmm(b_masks.float().unsqueeze(2).expand(-1, -1, sequence_output.size(2)), s_masks.float().unsqueeze(2).expand(-1, -1, sequence_output.size(2)).transpose(1,2))
+        # weights -= (matrix_mask <= 0).float() * 1e25
+        # attn = torch.softmax(weights, dim=-1) * (matrix_mask > 0).float()
+        
+        # value = sequence_output
+        # B_weights2 = torch.bmm(attn, value)
+        # B_weights2 = self.B_mlp(B_weights2).squeeze(-1)
+        # B_weights2 -= (b_masks == 0).float() * 1e25
+        # B_attn2 = torch.softmax(B_weights2, dim=-1) * b_masks.float()
+        # #print(B_attn2)
+        # #print("B_attn2", B_attn2.size())
 
-            # STEP4, get S_attn
+        # STEP4, get S_attn
 
-            #B x cands_num x Dim
-            B_reps1 = B_reps1.expand(-1, cands_num, -1)
-            B_reps2 = B_reps2.expand(-1, cands_num, -1)
+        #B x cands_num x Dim
+        B_reps1 = B_reps1.expand(-1, cands_num, -1)
+        B_reps2 = B_reps2.expand(-1, cands_num, -1)
 
-            cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
-            if self.positional_encoding:
-                cands_reps = self.positional_encoding(cands_reps)
-            else:
-                cands_reps = self.dropout(cands_reps)
+        cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
+        if self.positional_encoding:
+            cands_reps = self.positional_encoding(cands_reps)
+        else:
+            cands_reps = self.dropout(cands_reps)
 
-            CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
-            CB_reps = self.CB_mlp(CB_reps)
+        CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
+        CB_reps = self.CB_mlp(CB_reps)
 
-            #B x cands_num x Dim
-            CB_reps = self.dropout(CB_reps)
+        #B x cands_num x Dim
+        CB_reps = self.dropout(CB_reps)
 
-            #B x cands_num x Dim, B x cands_num x L
-            S_reps, S_attn = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, cands_num, -1))
+        #B x cands_num x Dim, B x cands_num x L
+        S_reps, S_attn = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, cands_num, -1))
 
-            S_reps = self.dropout(S_reps)
+        S_reps = self.dropout(S_reps)
 
-            # S_weights = torch.matmul(CB_reps, sequence_output.transpose(1,2))
-            # s_masks = s_masks.unsqueeze(1).expand(-1, cands_num, -1)
-            # S_weights = S_weights.masked_fill((s_masks <= 0), -1e18)
-            # # B x 1 x L
-            # S_attn = torch.softmax(S_weights, dim=-1)
-            # #print("S_attn", S_attn.size())
+        # S_weights = torch.matmul(CB_reps, sequence_output.transpose(1,2))
+        # s_masks = s_masks.unsqueeze(1).expand(-1, cands_num, -1)
+        # S_weights = S_weights.masked_fill((s_masks <= 0), -1e18)
+        # # B x 1 x L
+        # S_attn = torch.softmax(S_weights, dim=-1)
+        # #print("S_attn", S_attn.size())
 
-            # #score candidates
-            # S_reps = torch.bmm(S_attn, sequence_output)
-            # S_reps = self.dropout(S_reps)
+        # #score candidates
+        # S_reps = torch.bmm(S_attn, sequence_output)
+        # S_reps = self.dropout(S_reps)
 
-            # STEP5, SCORE
+        # STEP5, SCORE
 
-            if self.ablation == 4: #
-                reps = conds_reps
-            elif self.ablation == 3: #q
-                reps = torch.cat((cands_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-            elif self.ablation == 2: #q b1
-                reps = torch.cat((cands_reps, B_reps1, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-            elif self.ablation == 1: #q b1 b2
-                reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-            else: #q b1 b2 s
-                reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        if self.ablation == 4: #
+            reps = conds_reps
+        elif self.ablation == 3: #q
+            reps = torch.cat((cands_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == 2: #q b1
+            reps = torch.cat((cands_reps, B_reps1, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == 1: #q b1 b2
+            reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        else: #q b1 b2 s
+            reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
 
-            scores = self.scorer(reps).squeeze(-1)
+        scores = self.scorer(reps).squeeze(-1)
         #print("scores", scores)
 
         #computing loss
