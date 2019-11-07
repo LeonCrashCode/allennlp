@@ -1249,7 +1249,8 @@ class RobertaSpanReasoningMultihopModel(Model):
                  transformer_weights_model: str = None,
                  layer_freeze_regexes: List[str] = None,
                  dropout: float = 0,
-                 ablation: str = "all",
+                 ablation: int = 0,
+                 share_mh: bool = False,
                  on_load: bool = False,
                  regularizer: Optional[RegularizerApplicator] = None) -> None:
         super().__init__(vocab, regularizer)
@@ -1278,8 +1279,13 @@ class RobertaSpanReasoningMultihopModel(Model):
         self.B_mlp = Linear(transformer_config.hidden_size, 1)
         self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
         self.B1_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
-        self.B2_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
-        self.S_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+
+        if share_mh:
+            self.B2_multi_head_attention = self.B1_multi_head_attention
+            self.S_multi_head_attention = self.B1_multi_head_attention
+        else:
+            self.B2_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+            self.S_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
 
         self.scorer = Linear(transformer_config.hidden_size*(6-self.ablation),1)
 
