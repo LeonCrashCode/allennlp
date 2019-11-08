@@ -1341,18 +1341,7 @@ class RobertaSpanReasoningMultihopModel(Model):
         b_masks = b_masks * tokens_mask
         s_masks = s_masks * tokens_mask
         q_masks = q_masks * tokens_mask
-        
-        # if self._debug > 0:
-        #     print(f"batch_size = {batch_size}")
-        #     print(f"num_choices = {num_choices}")
-        #     print(f"tokens_mask = {tokens_mask}")
-        #     print(f"input_ids.size() = {input_ids.size()}")
-        #     print(f"input_ids = {input_ids}")
-        #     print(f"segment_ids = {segment_ids}")
-        #     print(f"start_positions = {start_positions}")
-        #     print(f"end_positions = {end_positions}")
 
-        # Segment ids are not used by RoBERTa
 
         transformer_outputs = self._transformer_model(input_ids=input_ids,
                                                       # token_type_ids=segment_ids,
@@ -1364,39 +1353,21 @@ class RobertaSpanReasoningMultihopModel(Model):
             cands_reps = self.positional_encoding(cands_reps)
         else:
             cands_reps = self.dropout(cands_reps)
-        # STEP1, get Q_attn and Q_reps
-        #print("Get Q_attn and Q_reps")
+
+
         Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
         Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
         Q_attn = torch.softmax(Q_weights, dim=-1)
-        #print("Q_attn", Q_attn)
-        #print("Q_attn", Q_attn.size())
+
         Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
         Q_reps = self.dropout(Q_reps)
-        #print("Q_reps", Q_reps)
-        #print("Q_reps", Q_reps.size())
 
         # STEP2, get B_attn1
-        #print("Get B_attn1")
-
         # B x 1 x Dim, B x 1 x L
         B_reps1, B_attn1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
         B_reps1 = self.dropout(B_reps1)
-        # B_weights1 = torch.bmm(Q_reps.unsqueeze(1), sequence_output.transpose(1,2)).squeeze(1)
-
-        # norm = torch.norm(B_weights1, dim=-1, keepdim=True) # the weights are too large
-        # B_weights1 = B_weights1.div(norm)
-        # #print("B_weights1", B_weights1)
-        # #print("B_weights1.size()", B_weights1.size())
-        # B_weights1 -= (b_masks == 0).float() * 1e25
-        # #print("B_weights1", B_weights1)
-        # B_attn1 = torch.softmax(B_weights1, dim=-1) * b_masks.float()
-        # #print("B_attn1", B_attn1)
-        # #print("B_attn1", B_attn1.size())
-
+        
         # STEP3, get B_attn2
-        #print("Get B_attn2")
-
         sb_masks = torch.matmul(s_masks.float().unsqueeze(2), b_masks.float().unsqueeze(1))
 
         # B x L x Dim, B x L x L
@@ -1408,21 +1379,6 @@ class RobertaSpanReasoningMultihopModel(Model):
         B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
         # B x 1 x Dim
         B_reps2 = self.dropout(B_reps2)
-
-        # key = B_attn1.unsqueeze(2).expand(-1, -1, sequence_output.size(2)) * sequence_output
-        # query = sequence_output
-        # weights = torch.bmm(key, query.transpose(1,2))
-        # matrix_mask = torch.bmm(b_masks.float().unsqueeze(2).expand(-1, -1, sequence_output.size(2)), s_masks.float().unsqueeze(2).expand(-1, -1, sequence_output.size(2)).transpose(1,2))
-        # weights -= (matrix_mask <= 0).float() * 1e25
-        # attn = torch.softmax(weights, dim=-1) * (matrix_mask > 0).float()
-        
-        # value = sequence_output
-        # B_weights2 = torch.bmm(attn, value)
-        # B_weights2 = self.B_mlp(B_weights2).squeeze(-1)
-        # B_weights2 -= (b_masks == 0).float() * 1e25
-        # B_attn2 = torch.softmax(B_weights2, dim=-1) * b_masks.float()
-        # #print(B_attn2)
-        # #print("B_attn2", B_attn2.size())
 
         # STEP4, get S_attn
 
@@ -1447,17 +1403,6 @@ class RobertaSpanReasoningMultihopModel(Model):
 
         S_reps = self.dropout(S_reps)
 
-        # S_weights = torch.matmul(CB_reps, sequence_output.transpose(1,2))
-        # s_masks = s_masks.unsqueeze(1).expand(-1, cands_num, -1)
-        # S_weights = S_weights.masked_fill((s_masks <= 0), -1e18)
-        # # B x 1 x L
-        # S_attn = torch.softmax(S_weights, dim=-1)
-        # #print("S_attn", S_attn.size())
-
-        # #score candidates
-        # S_reps = torch.bmm(S_attn, sequence_output)
-        # S_reps = self.dropout(S_reps)
-
         # STEP5, SCORE
 
         if self.ablation == 4: #
@@ -1468,6 +1413,274 @@ class RobertaSpanReasoningMultihopModel(Model):
             reps = torch.cat((cands_reps, B_reps1, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         elif self.ablation == 1: #q b1 b2
             reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        else: #q b1 b2 s
+            reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+
+        scores = self.scorer(reps).squeeze(-1)
+        #print("scores", scores)
+
+        #computing loss
+        log_probs = log_softmax(scores)
+        self._accuracy(log_probs, best)
+
+        output_dict = {}
+        output_dict["loss"] = self.loss(log_probs, best)
+        output_dict["best"] = scores.argmax(-1)
+        output_dict["scores"] = scores
+        output_dict["log_probs"] = log_probs
+        if metadata is not None:
+            output_dict["qid"] = []
+            for i in range(batch_size):
+                output_dict["qid"].append(metadata[i]['qas_id'])
+
+        # # Compute the EM and F1 on SQuAD and add the tokenized input to the output.
+        # if metadata is not None:
+        #     output_dict['best_span_str'] = []
+        #     output_dict['exact_match'] = []
+        #     output_dict['f1_score'] = []
+        #     output_dict['qid'] = []
+        #     tokens_texts = []
+        #     for i in range(batch_size):
+        #         tokens_text = metadata[i]['tokens']
+        #         tokens_texts.append(tokens_text)
+        #         predicted_span = tuple(best_span[i].detach().cpu().numpy())
+        #         predicted_start = predicted_span[0]
+        #         predicted_end = predicted_span[1]
+        #         predicted_tokens = tokens_text[predicted_start:(predicted_end + 1)]
+        #         best_span_string = self.convert_tokens_to_string(predicted_tokens)
+        #         output_dict['best_span_str'].append(best_span_string)
+        #         answer_texts = metadata[i].get('answer_texts', [])
+        #         exact_match = 0
+        #         f1_score = 0
+        #         if answer_texts:
+        #             exact_match, f1_score = self._squad_metrics(best_span_string, answer_texts)
+        #         output_dict['exact_match'].append(exact_match)
+        #         output_dict['f1_score'].append(f1_score)
+        #         output_dict['qid'].append(metadata[i]['id'])
+        #     output_dict['tokens_texts'] = tokens_texts
+
+        # if self._debug > 0:
+        #     print(f"output_dict = {output_dict}")
+
+        return output_dict
+
+    def convert_tokens_to_string(self, tokens):
+        """ Converts a sequence of tokens (string) in a single string. """
+        text = ''.join(tokens)
+        text = bytearray([self.byte_decoder[c] for c in text]).decode('utf-8', errors='replace')
+        return text
+
+    def get_metrics(self, reset: bool = False) -> Dict[str, float]:
+        return {
+            'acc': self._accuracy.get_metric(reset)
+        }
+
+    @classmethod
+    def _load(cls,
+              config: Params,
+              serialization_dir: str,
+              weights_file: str = None,
+              cuda_device: int = -1,
+              **kwargs) -> 'Model':
+        model_params = config.get('model')
+        model_params.update({"on_load": True})
+        config.update({'model': model_params})
+        return super()._load(config=config,
+                             serialization_dir=serialization_dir,
+                             weights_file=weights_file,
+                             cuda_device=cuda_device,
+                             **kwargs)
+
+@Model.register("roberta_span_reasoning_multihop")
+class RobertaSpanReasoningMultihopModel(Model):
+    """
+
+    """
+    def __init__(self,
+                 vocab: Vocabulary,
+                 #span_extractor: SpanExtractor,
+                 position_info: str=None,
+                 pretrained_model: str = None,
+                 requires_grad: bool = True,
+                 transformer_weights_model: str = None,
+                 layer_freeze_regexes: List[str] = None,
+                 dropout: float = 0,
+                 ablation: int = 0,
+                 share_mh: bool = False,
+                 on_load: bool = False,
+                 regularizer: Optional[RegularizerApplicator] = None) -> None:
+        super().__init__(vocab, regularizer)
+
+        if on_load:
+            logging.info(f"Skipping loading of initial Transformer weights")
+            transformer_config = RobertaConfig.from_pretrained(pretrained_model)
+            self._transformer_model = RobertaModel(transformer_config)
+
+        elif transformer_weights_model:
+            logging.info(f"Loading Transformer weights model from {transformer_weights_model}")
+            transformer_model_loaded = load_archive(transformer_weights_model)
+            self._transformer_model = transformer_model_loaded.model._transformer_model
+        else:
+            self._transformer_model = RobertaModel.from_pretrained(pretrained_model)
+
+        for name, param in self._transformer_model.named_parameters():
+            grad = requires_grad
+            if layer_freeze_regexes and grad:
+                grad = not any([bool(re.search(r, name)) for r in layer_freeze_regexes])
+            param.requires_grad = grad
+
+        transformer_config = self._transformer_model.config
+        self.ablation = ablation
+        self.Q_mlp = Linear(transformer_config.hidden_size, 1)
+        self.B_mlp = Linear(transformer_config.hidden_size, 1)
+        if self.ablation == 1:
+            self.CB_mlp = Linear(transformer_config.hidden_size*3, transformer_config.hidden_size)
+        else:
+            self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
+
+        self.B1_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+
+        if share_mh:
+            self.B2_multi_head_attention = self.B1_multi_head_attention
+            self.S_multi_head_attention = self.B1_multi_head_attention
+        else:
+            self.B2_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+            self.S_multi_head_attention = MultiHeadedAttention(head_count=8, model_dim=transformer_config.hidden_size, dropout=dropout)
+
+        if self.ablation in [4,3,2]:
+            self.scorer = Linear(transformer_config.hidden_size*(6-self.ablation+1), 1)
+        elif self.ablation == 1:
+            self.scorer = Linear(transformer_config.hidden_size*5, 1)
+        else:
+            self.scorer = Linear(transformer_config.hidden_size*6, 1)
+
+        self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
+        self.dropout = torch.nn.Dropout(p=dropout)
+
+        if position_info:
+            self.positional_encoding = PositionalEncoding(dropout=0.2, dim=transformer_config.hidden_size*2, max_len=10)
+        else:
+            self.positional_encoding = None
+
+        
+        self.loss = torch.nn.NLLLoss()
+
+        # Import GTP2 machinery to get from tokens to actual text
+        self.byte_decoder = {v: k for k, v in bytes_to_unicode().items()}
+
+        self._accuracy = CategoricalAccuracy()
+        self._debug = 0
+        self._padding_value = 1  # The index of the RoBERTa padding token
+
+
+
+    def forward(self,
+                tokens: Dict[str, torch.LongTensor],
+                segment_ids: torch.LongTensor = None,
+                b_masks: torch.LongTensor = None,
+                s_masks: torch.LongTensor = None,
+                q_masks: torch.LongTensor = None,
+                cands: torch.LongTensor = None,
+                cands_indices: torch.LongTensor = None,
+                best: torch.LongTensor = None,
+                metadata: List[Dict[str, Any]] = None) -> torch.Tensor:
+
+        # print(f"chunks:{chunks[0]}")
+        # print(f"sentence_graph: {sentence_graph[0][0]}")
+        # print(f"corefs: {corefs[0][0]}")
+        # print(f"cands: {cands}")
+        # print(f"cands_start: {cands_start}")
+        # print(f"cands_end: {cands_end}")
+        # print(sentence_graph.size())
+        # print(corefs.size())
+        # print(cands.size())
+        # print(metadata[0]["qas_id"])
+        # exit()
+
+        self._debug -= 1
+        input_ids = tokens['tokens']
+        cands_num = cands.size(1)
+        batch_size = segment_ids.size(0)
+
+        tokens_mask = (input_ids != self._padding_value).long()
+        b_masks = b_masks * tokens_mask
+        s_masks = s_masks * tokens_mask
+        q_masks = q_masks * tokens_mask
+
+
+        transformer_outputs = self._transformer_model(input_ids=input_ids,
+                                                      # token_type_ids=segment_ids,
+                                                      attention_mask=tokens_mask)
+        sequence_output = transformer_outputs[0]
+
+        cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
+        if self.positional_encoding:
+            cands_reps = self.positional_encoding(cands_reps)
+        else:
+            cands_reps = self.dropout(cands_reps)
+
+
+        Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
+        Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
+        Q_attn = torch.softmax(Q_weights, dim=-1)
+
+        Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
+        Q_reps = self.dropout(Q_reps)
+
+        # STEP2, get B_attn1
+        # B x 1 x Dim, B x 1 x L
+        B_reps1, B_attn1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
+        B_reps1 = self.dropout(B_reps1)
+        
+        # STEP3, get B_attn2
+        sb_masks = torch.matmul(s_masks.float().unsqueeze(2), b_masks.float().unsqueeze(1))
+
+        # B x L x Dim, B x L x L
+        B_reps2, B_attn2 = self.B2_multi_head_attention(key=B_attn1.transpose(1,2).expand(-1,-1,sequence_output.size(-1)) * sequence_output, value=sequence_output, query=sequence_output, mask=sb_masks)
+        
+        B_weights2 = self.B_mlp(B_reps2).squeeze(-1)
+        B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
+        B_attn2 = torch.softmax(B_weights2, dim=-1)
+        B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
+        # B x 1 x Dim
+        B_reps2 = self.dropout(B_reps2)
+
+        # STEP4, get S_attn
+
+        #B x cands_num x Dim
+        B_reps1 = B_reps1.expand(-1, cands_num, -1)
+        B_reps2 = B_reps2.expand(-1, cands_num, -1)
+
+        cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
+        if self.positional_encoding:
+            cands_reps = self.positional_encoding(cands_reps)
+        else:
+            cands_reps = self.dropout(cands_reps)
+
+        if self.ablation == 1:
+            CB_reps = torch.cat((cands_reps, B_reps1), dim=-1)
+        else:
+            CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
+        CB_reps = self.CB_mlp(CB_reps)
+
+        #B x cands_num x Dim
+        CB_reps = self.dropout(CB_reps)
+
+        #B x cands_num x Dim, B x cands_num x L
+        S_reps, S_attn = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, cands_num, -1))
+
+        S_reps = self.dropout(S_reps)
+
+        # STEP5, SCORE
+
+        if self.ablation == 4: #c q
+            reps = torch.cat((cands_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == 3: #c q b1
+            reps = torch.cat((cands_reps, B_reps1, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == 2: #c q b1 b2
+            reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == 1:
+            reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         else: #q b1 b2 s
             reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
 
