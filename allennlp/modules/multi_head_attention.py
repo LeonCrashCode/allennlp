@@ -61,7 +61,7 @@ class MultiHeadedAttention(nn.Module):
         self.final_linear = nn.Linear(model_dim, model_dim)
 
     def forward(self, key, value, query, mask=None,
-                layer_cache=None, attn_type=None):
+                layer_cache=None, attn_type=None, linear=True):
         """
         Compute the context vector and the attention vectors.
         Args:
@@ -143,9 +143,10 @@ class MultiHeadedAttention(nn.Module):
         #         layer_cache["memory_keys"] = key
         #         layer_cache["memory_values"] = value
         # else:
-        key = self.linear_keys(key)
-        value = self.linear_values(value)
-        query = self.linear_query(query)
+        if linear:
+          key = self.linear_keys(key)
+          value = self.linear_values(value)
+          query = self.linear_query(query)
 
         key = shape(key)
         value = shape(value)
