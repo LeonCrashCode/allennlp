@@ -41,7 +41,7 @@ class MultiHeadedAttention(nn.Module):
        dropout (float): dropout parameter
     """
 
-    def __init__(self, head_count, model_dim, dropout=0.1):
+    def __init__(self, head_count, model_dim, dropout=0.1, linear=True):
 
         assert model_dim % head_count == 0
         self.dim_per_head = model_dim // head_count
@@ -50,18 +50,20 @@ class MultiHeadedAttention(nn.Module):
         super(MultiHeadedAttention, self).__init__()
         self.head_count = head_count
 
-        self.linear_keys = nn.Linear(model_dim,
+        self.linear = linear
+        if self.linear:
+          self.linear_keys = nn.Linear(model_dim,
                                      head_count * self.dim_per_head)
-        self.linear_values = nn.Linear(model_dim,
+          self.linear_values = nn.Linear(model_dim,
                                        head_count * self.dim_per_head)
-        self.linear_query = nn.Linear(model_dim,
+          self.linear_query = nn.Linear(model_dim,
                                       head_count * self.dim_per_head)
         self.softmax = nn.Softmax(dim=-1)
         self.dropout = nn.Dropout(dropout)
         self.final_linear = nn.Linear(model_dim, model_dim)
 
     def forward(self, key, value, query, mask=None,
-                layer_cache=None, attn_type=None, linear=True):
+                layer_cache=None, attn_type=None):
         """
         Compute the context vector and the attention vectors.
         Args:
@@ -143,7 +145,7 @@ class MultiHeadedAttention(nn.Module):
         #         layer_cache["memory_keys"] = key
         #         layer_cache["memory_values"] = value
         # else:
-        if linear:
+        if self.linear:
           key = self.linear_keys(key)
           value = self.linear_values(value)
           query = self.linear_query(query)
