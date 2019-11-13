@@ -149,7 +149,7 @@ class MultiHeadedAttention(nn.Module):
           key = self.linear_keys(key)
           value = self.linear_values(value)
           query = self.linear_query(query)
-          
+
 
         key = shape(key)
         value = shape(value)
@@ -189,7 +189,7 @@ class MultiHeadedAttention(nn.Module):
         if query_len == 1:
           expanded_drop_attn = drop_attn.transpose(2,3).expand(-1,-1,-1,self.dim_per_head)
           expanded_context_original = expanded_drop_attn * value
-          expanded_context = unshape(expanded_context_original)
+          expanded_context = unshape(expanded_context_original).contiguous()
         # CHECK
         # batch_, q_len_, d_ = output.size()
         # aeq(q_len, q_len_)
