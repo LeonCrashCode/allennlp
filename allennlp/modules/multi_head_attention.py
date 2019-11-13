@@ -149,6 +149,7 @@ class MultiHeadedAttention(nn.Module):
           key = self.linear_keys(key)
           value = self.linear_values(value)
           query = self.linear_query(query)
+          
 
         key = shape(key)
         value = shape(value)
@@ -174,6 +175,7 @@ class MultiHeadedAttention(nn.Module):
         # 3) Apply attention dropout and compute context vectors.
      
         attn = self.softmax(scores).to(query.dtype)
+        
      
         drop_attn = self.dropout(attn)
 
@@ -182,6 +184,12 @@ class MultiHeadedAttention(nn.Module):
         context = unshape(context_original)
 
         output = self.final_linear(context)
+
+        expanded_context = None
+        if query_len == 1:
+          expanded_drop_attn = drop_attn.transpose(2,3).expand(-1,-1,-1,self.dim_per_head)
+          expanded_context_original = expanded_drop_attn * value
+          expanded_context = unshape(expanded_context_original)
         # CHECK
         # batch_, q_len_, d_ = output.size()
         # aeq(q_len, q_len_)
@@ -193,7 +201,8 @@ class MultiHeadedAttention(nn.Module):
             .view(batch_size, head_count,
                   query_len, key_len)[:, 0, :, :] \
             .contiguous()
-        return output, top_attn
+
+        return output, top_attn, expanded_context
 
     def update_dropout(self, dropout):
         self.dropout.p = dropout

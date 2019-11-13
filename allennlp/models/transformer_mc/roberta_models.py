@@ -1928,20 +1928,20 @@ class RobertaSpanReasoningMultihop3Model(Model):
         Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
         Q_attn = torch.softmax(Q_weights, dim=-1)
 
+        
         Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
         Q_reps = self.dropout(Q_reps)
-
         # STEP2, get B_attn1
-        # B x 1 x Dim, B x 1 x L
-        B_reps1, B_attn1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
+        # B x 1 x Dim, B x 1 x L, B x L x Dim
+        B_reps1, B_attn1, expanded_B_reps1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
         B_reps1 = self.dropout(B_reps1)
         
         # STEP3, get B_attn2
         sb_masks = torch.matmul(s_masks.float().unsqueeze(2), b_masks.float().unsqueeze(1))
 
         # B x L x Dim, B x L x L
-        B_reps2, B_attn2 = self.B2_multi_head_attention(key=B_attn1.transpose(1,2).expand(-1,-1,sequence_output.size(-1)) * sequence_output, value=sequence_output, query=sequence_output, mask=sb_masks)
-        
+        # B_reps2, B_attn2 = self.B2_multi_head_attention(key=B_attn1.transpose(1,2).expand(-1,-1,sequence_output.size(-1)) * sequence_output, value=sequence_output, query=sequence_output, mask=sb_masks)
+        B_reps2, B_attn2, _= self.B2_multi_head_attention(key=expanded_B_reps1, value=sequence_output, query=sequence_output, mask=sb_masks)
         B_weights2 = self.B_mlp(B_reps2).squeeze(-1)
         B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
         B_attn2 = torch.softmax(B_weights2, dim=-1)
@@ -1949,6 +1949,7 @@ class RobertaSpanReasoningMultihop3Model(Model):
         # B x 1 x Dim
         B_reps2 = self.dropout(B_reps2)
 
+        exit(-1)
         # STEP4, get S_attn
 
         #B x cands_num x Dim
@@ -1969,7 +1970,7 @@ class RobertaSpanReasoningMultihop3Model(Model):
         CB_reps = self.dropout(CB_reps)
 
         #B x cands_num x Dim, B x cands_num x L
-        S_reps, S_attn = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, cands_num, -1))
+        S_reps, S_attn, _ = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, cands_num, -1))
 
         S_reps = self.dropout(S_reps)
 
