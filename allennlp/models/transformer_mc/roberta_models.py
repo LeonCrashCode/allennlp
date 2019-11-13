@@ -1948,8 +1948,7 @@ class RobertaSpanReasoningMultihop3Model(Model):
         B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
         # B x 1 x Dim
         B_reps2 = self.dropout(B_reps2)
-
-        exit(-1)
+        
         # STEP4, get S_attn
 
         #B x cands_num x Dim
