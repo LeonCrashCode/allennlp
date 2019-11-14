@@ -199,7 +199,7 @@ class MultiHeadedAttention(nn.Module):
         # Return one attn
         top_attn = attn \
             .view(batch_size, head_count,
-                  query_len, key_len)[:, 0, :, :] \
+                  query_len, key_len)[:, :, :, :] \
             .contiguous()
 
         return output, top_attn, expanded_context
