@@ -2234,9 +2234,9 @@ class RobertaSpanReasoningMultihop4Model(Model):
         B_weights2 = self.B_mlp(sequence_output).squeeze(-1)
         B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
         B_attn2 = torch.softmax(B_weights2, dim=-1)
-        output_dict["q_attn"] = B_attn2
+        output_dict["b_attn2"] = B_attn2
         
-        B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output).squeeze(1)
+        B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
         B_reps2 = self.dropout(B_reps2)
         # STEP4, get S_attn
 
