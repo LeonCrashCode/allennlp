@@ -44,7 +44,9 @@ DEFAULT_PREDICTORS = {
         'roberta_span_reasoning': 'span-reasoning-ropes',
         'roberta_span_reasoning_syntax': 'span-reasoning-ropes',
         'roberta_span_reasoning_multihop': 'span-reasoning-ropes',
-        'roberta_span_reasoning_multihop3': 'span-reasoning-ropes'
+        'roberta_span_reasoning_multihop3': 'span-reasoning-ropes',
+        'roberta_span_reasoning_multihop4': 'span-reasoning-ropes',
+        'roberta_span_reasoning_multihop5': 'span-reasoning-ropes'
 }
 
 class Predictor(Registrable):
