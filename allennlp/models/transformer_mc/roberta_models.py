@@ -1949,7 +1949,7 @@ class RobertaSpanReasoningMultihop3Model(Model):
         B_weights2 = B_weights2.masked_fill((s_masks <= 0), -1e18)
         B_attn2 = torch.softmax(B_weights2, dim=-1)
         output_dict["b_attn2_self"] = B_attn2.masked_fill((s_masks <= 0), 0)
-        B_reps2 = torch.matmul(B_attn2.unsqueeze(1), B_attn2)
+        B_reps2 = torch.matmul(B_attn2.unsqueeze(1), B_reps2)
         # B x 1 x Dim
         B_reps2 = self.dropout(B_reps2)
 
