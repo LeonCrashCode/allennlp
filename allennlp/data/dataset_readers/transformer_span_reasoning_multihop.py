@@ -180,6 +180,7 @@ class TransformerSpanReasoningMultihopReader(DatasetReader):
         metadata['qas_id'] = example.qas_id
         metadata['cands'] = features.cands
         metadata['best'] = features.best
+        metadata['tokens'] = features.tokens
         if debug > 0:
             logger.info(f"tokens = {features.tokens}")
             logger.info(f"segment_ids = {features.segment_ids}")
