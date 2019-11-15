@@ -1942,7 +1942,7 @@ class RobertaSpanReasoningMultihop3Model(Model):
         # B x L x Dim, B x L x L
         # B_reps2, B_attn2 = self.B2_multi_head_attention(key=B_attn1.transpose(1,2).expand(-1,-1,sequence_output.size(-1)) * sequence_output, value=sequence_output, query=sequence_output, mask=sb_masks)
         B_reps2, B_attn2, _= self.B2_multi_head_attention(key=expanded_B_reps1, value=sequence_output, query=sequence_output, mask=sb_masks)
-        output_dict["b_attn2"] = B_attn2
+        output_dict["b_attn2"] = B_attn2.sum(2)
         B_weights2 = self.B_mlp(B_reps2).squeeze(-1)
         B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
         B_attn2 = torch.softmax(B_weights2, dim=-1)
