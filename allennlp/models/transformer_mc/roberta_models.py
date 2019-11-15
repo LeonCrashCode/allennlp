@@ -1815,7 +1815,7 @@ class RobertaSpanReasoningMultihop3Model(Model):
                  ablation: int = 0,
                  share_mh: bool = False,
                  linear: bool = True,
-                 head: int = 1,
+                 head: int = 8,
                  on_load: bool = False,
                  regularizer: Optional[RegularizerApplicator] = None) -> None:
         super().__init__(vocab, regularizer)
