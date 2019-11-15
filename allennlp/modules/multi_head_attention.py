@@ -175,6 +175,7 @@ class MultiHeadedAttention(nn.Module):
         # 3) Apply attention dropout and compute context vectors.
      
         attn = self.softmax(scores).to(query.dtype)
+        attn = attn.masked_fill((mask <= 0), 0)
         
      
         drop_attn = self.dropout(attn)
