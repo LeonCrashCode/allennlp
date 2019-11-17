@@ -2895,7 +2895,8 @@ class RobertaSpanReasoningMultihop43Model(Model):
         # # B x 1 x Dim
         # B_reps2 = self.dropout(B_reps2)
 
-        
+        B_reps1 = B_reps1.expand(-1, cands_num, -1)
+
         reps = torch.cat((cands_reps, B_reps1, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         
         scores = self.scorer(reps).squeeze(-1)
@@ -3110,6 +3111,7 @@ class RobertaSpanReasoningMultihop44Model(Model):
         S_reps = self.dropout(S_reps)
         output_dict["s_attn"] = S_reps
 
+        B_reps1 = B_reps1.expand(-1, cands_num, -1)
         reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         
         scores = self.scorer(reps).squeeze(-1)
@@ -3242,7 +3244,7 @@ class RobertaSpanReasoningMultihop45Model(Model):
         self.S_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
         
-        self.scorer = Linear(transformer_config.hidden_size*4, 1)
+        self.scorer = Linear(transformer_config.hidden_size*5, 1)
 
         self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
         self.dropout = torch.nn.Dropout(p=dropout)
@@ -3470,7 +3472,7 @@ class RobertaSpanReasoningMultihop46Model(Model):
         self.S_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
         
-        self.scorer = Linear(transformer_config.hidden_size*4, 1)
+        self.scorer = Linear(transformer_config.hidden_size*5, 1)
 
         self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
         self.dropout = torch.nn.Dropout(p=dropout)
