@@ -2358,7 +2358,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
 @Model.register("roberta_span_reasoning_multihop41")
 class RobertaSpanReasoningMultihop41Model(Model):
     """
-    Candidates
+    C
     """
     def __init__(self,
                  vocab: Vocabulary,
@@ -2549,7 +2549,7 @@ class RobertaSpanReasoningMultihop41Model(Model):
 @Model.register("roberta_span_reasoning_multihop42")
 class RobertaSpanReasoningMultihop42Model(Model):
     """
-    Candidates + Q
+    C + Q
     """
     def __init__(self,
                  vocab: Vocabulary,
@@ -2752,7 +2752,7 @@ class RobertaSpanReasoningMultihop42Model(Model):
 @Model.register("roberta_span_reasoning_multihop43")
 class RobertaSpanReasoningMultihop43Model(Model):
     """
-    Candidates + Q + Q->B
+    C + Q + Q->B
     """
     def __init__(self,
                  vocab: Vocabulary,
@@ -2982,7 +2982,7 @@ class RobertaSpanReasoningMultihop43Model(Model):
 @Model.register("roberta_span_reasoning_multihop44")
 class RobertaSpanReasoningMultihop44Model(Model):
     """
-    Candidates + Q + Q->B + Q->S
+    C + Q + Q->B + Q->S
     """
     def __init__(self,
                  vocab: Vocabulary,
@@ -3112,6 +3112,7 @@ class RobertaSpanReasoningMultihop44Model(Model):
         output_dict["s_attn"] = S_reps
 
         B_reps1 = B_reps1.expand(-1, cands_num, -1)
+        S_reps = S_reps.expand(-1, cands_num, -1)
         reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         
         scores = self.scorer(reps).squeeze(-1)
@@ -3945,7 +3946,6 @@ class RobertaSpanReasoningMultihop5Model(Model):
                              cuda_device=cuda_device,
                              **kwargs)
 
-
 @Model.register("roberta_sequence_classifier")
 class RobertaSequenceClassifierModel(Model):
     """
@@ -4077,7 +4077,6 @@ class RobertaSequenceClassifierModel(Model):
                              weights_file=weights_file,
                              cuda_device=cuda_device,
                              **kwargs)
-
 
 @Model.register("roberta_sequence_labelling")
 class RobertaSequenceLabelingModel(Model):
