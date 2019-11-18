@@ -3704,6 +3704,7 @@ class RobertaSpanReasoningMultihop47Model(Model):
         self.ablation = ablation
 
         self.Q_mlp = Linear(transformer_config.hidden_size, 1)
+        self.C_mlp = Linear(transformer_config.hidden_size*2, transformer_config.hidden_size)
         self.B1_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
         self.scorer = Linear(transformer_config.hidden_size*4, 1)
@@ -3783,7 +3784,9 @@ class RobertaSpanReasoningMultihop47Model(Model):
         Q_reps = self.dropout(Q_reps)
         # STEP2, get B_attn1
         # B x 1 x Dim, B x 1 x L, B x L x Dim
-        B_reps1, B_attn1, _ = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=cands_reps, mask=b_masks.unsqueeze(1))
+
+        query=self.C_mlp(cands_reps)
+        B_reps1, B_attn1, _ = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=query, mask=b_masks.unsqueeze(1))
         B_reps1 = self.dropout(B_reps1)
         output_dict["b_attn1"] = B_attn1
 
@@ -3914,6 +3917,7 @@ class RobertaSpanReasoningMultihop48Model(Model):
         self.ablation = ablation
 
         self.Q_mlp = Linear(transformer_config.hidden_size, 1)
+        self.C_mlp = Linear(transformer_config.hidden_size*2, transformer_config.hidden_size)
         self.B1_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
         self.S_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
@@ -3992,13 +3996,15 @@ class RobertaSpanReasoningMultihop48Model(Model):
         
         Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
         Q_reps = self.dropout(Q_reps)
+
+        query=self.C_mlp(cands_reps)
         # STEP2, get B_attn1
         # B x 1 x Dim, B x 1 x L, B x L x Dim
-        B_reps1, B_attn1, _ = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=cands_reps, mask=b_masks.unsqueeze(1))
+        B_reps1, B_attn1, _ = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=query, mask=b_masks.unsqueeze(1))
         B_reps1 = self.dropout(B_reps1)
         output_dict["b_attn1"] = B_attn1
 
-        S_reps, S_attn, _ = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=cands_reps, mask=s_masks.unsqueeze(1))
+        S_reps, S_attn, _ = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=query, mask=s_masks.unsqueeze(1))
         S_reps = self.dropout(S_reps)
         output_dict["s_attn"] = S_attn
 
