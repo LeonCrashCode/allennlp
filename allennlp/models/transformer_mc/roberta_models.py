@@ -2264,16 +2264,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
 
         # STEP5, SCORE
 
-        if self.ablation == 4: #c q
-            reps = torch.cat((cands_reps, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-        elif self.ablation == 3: #c q b1
-            reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-        elif self.ablation == 2: #c q b1 b2
-            reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
-        elif self.ablation == 1:
-            reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps), dim=-1)
-        else: #q b1 b2 s
-            reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
 
         scores = self.scorer(reps).squeeze(-1)
         #print("scores", scores)
@@ -3876,7 +3867,7 @@ class RobertaSpanReasoningMultihop47Model(Model):
 @Model.register("roberta_span_reasoning_multihop48")
 class RobertaSpanReasoningMultihop48Model(Model):
     """
-    C + Q + C->B
+    C + Q + C->B + C->S
     """
     def __init__(self,
                  vocab: Vocabulary,
