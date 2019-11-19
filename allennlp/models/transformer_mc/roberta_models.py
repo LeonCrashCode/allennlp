@@ -2087,7 +2087,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
                  transformer_weights_model: str = None,
                  layer_freeze_regexes: List[str] = None,
                  dropout: float = 0,
-                 ablation: int = 0,
+                 ablation: str = None,
                  share_mh: bool = False,
                  linear: bool = True,
                  head: int = 8,
@@ -2117,7 +2117,11 @@ class RobertaSpanReasoningMultihop4Model(Model):
         self.ablation = ablation
         self.Q_mlp = Linear(transformer_config.hidden_size, 1)
         self.B_mlp = Linear(transformer_config.hidden_size, 1)
-        self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
+
+        if self.ablation == "Q" or self.ablation == "B1":
+            self.CB_mlp = Linear(transformer_config.hidden_size*3, transformer_config.hidden_size)
+        else:
+            self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
 
         self.B1_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
@@ -2128,7 +2132,9 @@ class RobertaSpanReasoningMultihop4Model(Model):
             self.B2_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
             self.S_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
-        if self.ablation != 0:
+        if self.ablation == "Q":
+            self.scorer = Linear(transformer_config.hidden_size*4, 1)
+        elif self.ablation in ["B1", "B2", "S"]:
             self.scorer = Linear(transformer_config.hidden_size*5, 1)
         else:
             self.scorer = Linear(transformer_config.hidden_size*6, 1)
@@ -2250,8 +2256,13 @@ class RobertaSpanReasoningMultihop4Model(Model):
         else:
             cands_reps = self.dropout(cands_reps)
 
-        
-        CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
+        if self.ablation == "Q" or self.ablation == "B1":
+            CB_reps = torch.cat((cands_reps, B_reps2), dim=-1)
+        elif self.ablation == "B2":
+            CB_reps = torch.cat((cands_reps, B_reps1), dim=-1)
+        else:
+            CB_reps = torch.cat((cands_reps, B_reps1, B_reps2), dim=-1)
+
         CB_reps = self.CB_mlp(CB_reps)
 
         #B x cands_num x Dim
@@ -2264,7 +2275,16 @@ class RobertaSpanReasoningMultihop4Model(Model):
 
         # STEP5, SCORE
 
-        reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        if self.ablation == "Q":
+            reps = torch.cat((cands_reps, B_reps2, S_reps), dim=-1)   
+        elif self.ablation == "B1":
+            reps = torch.cat((cands_reps, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == "B2":
+            reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == "S":
+            reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        else:    
+            reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
 
         scores = self.scorer(reps).squeeze(-1)
         #print("scores", scores)
