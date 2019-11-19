@@ -2118,7 +2118,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
         self.Q_mlp = Linear(transformer_config.hidden_size, 1)
         self.B_mlp = Linear(transformer_config.hidden_size, 1)
 
-        if self.ablation == "Q" or self.ablation == "B1":
+        if self.ablation in ["Q", "B1", "B2"]:
             self.CB_mlp = Linear(transformer_config.hidden_size*3, transformer_config.hidden_size)
         else:
             self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
