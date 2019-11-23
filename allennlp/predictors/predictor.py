@@ -39,6 +39,7 @@ DEFAULT_PREDICTORS = {
         'wikitables_mml_parser': 'wikitables-parser',
         'xlnet_mc_qa': 'multiple-choice-qa',
         'roberta_span_prediction':'span-prediction-ropes',
+        'roberta_span_prediction_multihop':'span-prediction-ropes',
         'bert_span_prediction':'span-prediction-ropes',
         'roberta_sequence_labelling':'sequence-labelling-gec',
         'roberta_span_reasoning': 'span-reasoning-ropes',
