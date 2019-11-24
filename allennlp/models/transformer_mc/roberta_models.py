@@ -17,7 +17,7 @@ from allennlp.models.reading_comprehension.util import get_best_span
 from allennlp.nn import RegularizerApplicator, util
 from allennlp.training.metrics import BooleanAccuracy, CategoricalAccuracy, SquadEmAndF1, F1Measure, FBetaMeasure
 from allennlp.modules.token_embedders import Embedding
-from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor, EndpointSpanExtractor
+from allennlp.modules.span_extractors import SelfAttentiveSpanExtractor, EndpointSpanExtractor, BidirectionalEndpointSpanExtractor
 from allennlp.modules.positional_encoding import PositionalEncoding
 from allennlp.modules.multi_head_attention import MultiHeadedAttention
 
@@ -606,7 +606,7 @@ class RobertaSpanPredictionMultihopModel(Model):
         Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
         Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
         Q_attn = torch.softmax(Q_weights, dim=-1)
-        # output_dict["q_attn"] = Q_attn
+        output_dict["q_attn"] = Q_attn
         
         Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
         Q_reps = self.dropout(Q_reps)
@@ -614,13 +614,13 @@ class RobertaSpanPredictionMultihopModel(Model):
         # B x 1 x Dim, B x 1 x L, B x L x Dim
         B_reps1, B_attn1, expanded_B_reps1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
         B_reps1 = self.dropout(B_reps1)
-        # output_dict["b_attn1"] = B_attn1
+        output_dict["b_attn1"] = B_attn1
         # STEP3, get B_attn2
 
         B_weights2 = self.B_mlp(sequence_output).squeeze(-1)
         B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
         B_attn2 = torch.softmax(B_weights2, dim=-1)
-        # output_dict["b_attn2"] = B_attn2
+        output_dict["b_attn2"] = B_attn2
         
         B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
         B_reps2 = self.dropout(B_reps2)
@@ -645,7 +645,7 @@ class RobertaSpanPredictionMultihopModel(Model):
 
         #B x cands_num x Dim, B x cands_num x L
         S_reps, S_attn, _ = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, num_choices, -1))
-        # output_dict["s_attn"] = S_attn
+        output_dict["s_attn"] = S_attn
         S_reps = self.dropout(S_reps)
 
         # STEP5, SCORE
@@ -680,7 +680,9 @@ class RobertaSpanPredictionMultihopModel(Model):
         output_dict = {"start_logits": start_logits, "end_logits": end_logits, "best_span": best_span}
         output_dict["start_probs"] = span_start_probs
         output_dict["end_probs"] = span_end_probs
-
+        output_dict["q_masks"] = q_masks
+        output_dict["b_masks"] = b_masks
+        output_dict["s_masks"] = s_masks
         if start_positions is not None and end_positions is not None:
             # If we are on multi-GPU, split add a dimension
             if len(start_positions.size()) > 1:
@@ -2387,6 +2389,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
                  share_mh: bool = False,
                  linear: bool = True,
                  head: int = 8,
+                 span_type: int = 0,
                  on_load: bool = False,
                  regularizer: Optional[RegularizerApplicator] = None) -> None:
         super().__init__(vocab, regularizer)
@@ -2415,9 +2418,15 @@ class RobertaSpanReasoningMultihop4Model(Model):
         self.B_mlp = Linear(transformer_config.hidden_size, 1)
 
         if self.ablation in ["Q", "B1", "B2"]:
-            self.CB_mlp = Linear(transformer_config.hidden_size*3, transformer_config.hidden_size)
+            if span_type in [1,2]:
+                self.CB_mlp = Linear(transformer_config.hidden_size*2, transformer_config.hidden_size)
+            else:
+                self.CB_mlp = Linear(transformer_config.hidden_size*3, transformer_config.hidden_size)
         else:
-            self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
+            if span_type in [1,2]:
+                self.CB_mlp = Linear(transformer_config.hidden_size*3, transformer_config.hidden_size)    
+            else:
+                self.CB_mlp = Linear(transformer_config.hidden_size*4, transformer_config.hidden_size)
 
         self.B1_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
@@ -2428,14 +2437,29 @@ class RobertaSpanReasoningMultihop4Model(Model):
             self.B2_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
             self.S_multi_head_attention = MultiHeadedAttention(head_count=head, model_dim=transformer_config.hidden_size, dropout=dropout, linear=linear)
 
-        if self.ablation == "Q":
-            self.scorer = Linear(transformer_config.hidden_size*4, 1)
-        elif self.ablation in ["B1", "B2", "S"]:
-            self.scorer = Linear(transformer_config.hidden_size*5, 1)
+        if span_type in [1,2]:
+            if self.ablation == "Q":
+                self.scorer = Linear(transformer_config.hidden_size*3, 1)
+            elif self.ablation in ["B1", "B2", "S"]:
+                self.scorer = Linear(transformer_config.hidden_size*4, 1)
+            else:
+                self.scorer = Linear(transformer_config.hidden_size*5, 1)
         else:
-            self.scorer = Linear(transformer_config.hidden_size*6, 1)
+            if self.ablation == "Q":
+                self.scorer = Linear(transformer_config.hidden_size*4, 1)
+            elif self.ablation in ["B1", "B2", "S"]:
+                self.scorer = Linear(transformer_config.hidden_size*5, 1)
+            else:
+                self.scorer = Linear(transformer_config.hidden_size*6, 1)
 
-        self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
+        if span_type == 1:
+            self.span_extractor = BidirectionalEndpointSpanExtractor(input_dim=transformer_config.hidden_size)
+        elif span_type == 2:
+            self.span_extractor = SelfAttentiveSpanExtractor(input_dim=transformer_config.hidden_size)
+        else:
+            self.span_extractor = EndpointSpanExtractor(input_dim=transformer_config.hidden_size)
+
+
         self.dropout = torch.nn.Dropout(p=dropout)
 
         if position_info:
@@ -2494,11 +2518,11 @@ class RobertaSpanReasoningMultihop4Model(Model):
                                                       attention_mask=tokens_mask)
         sequence_output = transformer_outputs[0]
 
-        cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
-        if self.positional_encoding:
-            cands_reps = self.positional_encoding(cands_reps)
-        else:
-            cands_reps = self.dropout(cands_reps)
+        # cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
+        # if self.positional_encoding:
+        #     cands_reps = self.positional_encoding(cands_reps)
+        # else:
+        #     cands_reps = self.dropout(cands_reps)
 
 
         Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
@@ -2551,6 +2575,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
             cands_reps = self.positional_encoding(cands_reps)
         else:
             cands_reps = self.dropout(cands_reps)
+
 
         if self.ablation == "Q" or self.ablation == "B1":
             CB_reps = torch.cat((cands_reps, B_reps2), dim=-1)
