@@ -602,7 +602,7 @@ class RobertaSpanPredictionMultihopModel(Model):
 
         sequence_output = transformer_outputs[0]
 
-
+        output_dict = {}
         Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
         Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
         Q_attn = torch.softmax(Q_weights, dim=-1)
@@ -677,7 +677,10 @@ class RobertaSpanPredictionMultihopModel(Model):
         best_span = get_best_span(span_start_logits, span_end_logits)
         span_start_probs = util.masked_softmax(span_start_logits, tokens_mask)
         span_end_probs = util.masked_softmax(span_end_logits, tokens_mask)
-        output_dict = {"start_logits": start_logits, "end_logits": end_logits, "best_span": best_span}
+        
+        output_dict["start_logits"] = start_logits
+        output_dict["end_logits"] = end_logits
+        output_dict["best_span"] = best_span
         output_dict["start_probs"] = span_start_probs
         output_dict["end_probs"] = span_end_probs
         output_dict["q_masks"] = q_masks
