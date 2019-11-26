@@ -2521,11 +2521,11 @@ class RobertaSpanReasoningMultihop4Model(Model):
                                                       attention_mask=tokens_mask)
         sequence_output = transformer_outputs[0]
 
-        # cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
-        # if self.positional_encoding:
-        #     cands_reps = self.positional_encoding(cands_reps)
-        # else:
-        #     cands_reps = self.dropout(cands_reps)
+        cands_reps = self.span_extractor(sequence_output, cands, sequence_mask=tokens_mask)
+        if self.positional_encoding:
+            cands_reps = self.positional_encoding(cands_reps)
+        else:
+            cands_reps = self.dropout(cands_reps)
 
 
         Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
