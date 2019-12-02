@@ -2531,15 +2531,16 @@ class RobertaSpanReasoningMultihop4Model(Model):
         Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
         Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
         Q_attn = torch.softmax(Q_weights, dim=-1)
-        output_dict["q_attn"] = Q_attn
+        #output_dict["q_attn"] = Q_attn
         
         Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
         Q_reps = self.dropout(Q_reps)
+
         # STEP2, get B_attn1
         # B x 1 x Dim, B x 1 x L, B x L x Dim
         B_reps1, B_attn1, expanded_B_reps1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
         B_reps1 = self.dropout(B_reps1)
-        output_dict["b_attn1"] = B_attn1
+        #output_dict["b_attn1"] = B_attn1
         # STEP3, get B_attn2
         # sb_masks = torch.matmul(s_masks.float().unsqueeze(2), b_masks.float().unsqueeze(1))
 
@@ -2563,7 +2564,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
         B_weights2 = self.B_mlp(sequence_output).squeeze(-1)
         B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
         B_attn2 = torch.softmax(B_weights2, dim=-1)
-        output_dict["b_attn2"] = B_attn2
+        #output_dict["b_attn2"] = B_attn2
         
         B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
         B_reps2 = self.dropout(B_reps2)
@@ -2594,7 +2595,7 @@ class RobertaSpanReasoningMultihop4Model(Model):
 
         #B x cands_num x Dim, B x cands_num x L
         S_reps, S_attn, _ = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, cands_num, -1))
-        output_dict["s_attn"] = S_attn
+        #output_dict["s_attn"] = S_attn
         S_reps = self.dropout(S_reps)
 
         # STEP5, SCORE
@@ -2622,9 +2623,9 @@ class RobertaSpanReasoningMultihop4Model(Model):
         output_dict["best"] = scores.argmax(-1)
         output_dict["scores"] = scores
         output_dict["log_probs"] = log_probs
-        output_dict["q_masks"] = q_masks
-        output_dict["b_masks"] = b_masks
-        output_dict["s_masks"] = s_masks
+        #output_dict["q_masks"] = q_masks
+        #output_dict["b_masks"] = b_masks
+        #output_dict["s_masks"] = s_masks
 
         if metadata is not None:
             output_dict["qid"] = []
