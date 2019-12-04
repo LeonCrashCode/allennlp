@@ -606,7 +606,7 @@ class RobertaSpanPredictionMultihopModel(Model):
         Q_weights = self.Q_mlp(sequence_output).squeeze(-1)
         Q_weights = Q_weights.masked_fill((q_masks <= 0), -1e18)
         Q_attn = torch.softmax(Q_weights, dim=-1)
-        output_dict["q_attn"] = Q_attn
+        #output_dict["q_attn"] = Q_attn
         
         Q_reps = torch.matmul(Q_attn.unsqueeze(1), sequence_output).squeeze(1)
         Q_reps = self.dropout(Q_reps)
@@ -614,13 +614,13 @@ class RobertaSpanPredictionMultihopModel(Model):
         # B x 1 x Dim, B x 1 x L, B x L x Dim
         B_reps1, B_attn1, expanded_B_reps1 = self.B1_multi_head_attention(key=sequence_output, value=sequence_output, query=Q_reps.unsqueeze(1), mask=b_masks.unsqueeze(1))
         B_reps1 = self.dropout(B_reps1)
-        output_dict["b_attn1"] = B_attn1
+        #output_dict["b_attn1"] = B_attn1
         # STEP3, get B_attn2
 
         B_weights2 = self.B_mlp(sequence_output).squeeze(-1)
         B_weights2 = B_weights2.masked_fill((b_masks <= 0), -1e18)
         B_attn2 = torch.softmax(B_weights2, dim=-1)
-        output_dict["b_attn2"] = B_attn2
+        #output_dict["b_attn2"] = B_attn2
         
         B_reps2 = torch.matmul(B_attn2.unsqueeze(1), sequence_output)
         B_reps2 = self.dropout(B_reps2)
@@ -645,7 +645,7 @@ class RobertaSpanPredictionMultihopModel(Model):
 
         #B x cands_num x Dim, B x cands_num x L
         S_reps, S_attn, _ = self.S_multi_head_attention(key=sequence_output, value=sequence_output, query=CB_reps, mask=s_masks.unsqueeze(1).expand(-1, num_choices, -1))
-        output_dict["s_attn"] = S_attn
+        #output_dict["s_attn"] = S_attn
         S_reps = self.dropout(S_reps)
 
         # STEP5, SCORE
@@ -683,9 +683,9 @@ class RobertaSpanPredictionMultihopModel(Model):
         output_dict["best_span"] = best_span
         output_dict["start_probs"] = span_start_probs
         output_dict["end_probs"] = span_end_probs
-        output_dict["q_masks"] = q_masks
-        output_dict["b_masks"] = b_masks
-        output_dict["s_masks"] = s_masks
+        #output_dict["q_masks"] = q_masks
+        #output_dict["b_masks"] = b_masks
+        #output_dict["s_masks"] = s_masks
         if start_positions is not None and end_positions is not None:
             # If we are on multi-GPU, split add a dimension
             if len(start_positions.size()) > 1:
