@@ -2445,6 +2445,8 @@ class RobertaSpanReasoningMultihop4Model(Model):
                 self.scorer = Linear(transformer_config.hidden_size*3, 1)
             elif self.ablation in ["B1", "B2", "S"]:
                 self.scorer = Linear(transformer_config.hidden_size*4, 1)
+            elif self.ablation == "ALL":
+                self.scorer = Linear(transformer_config.hidden_size*2, 1)
             else:
                 self.scorer = Linear(transformer_config.hidden_size*5, 1)
         else:
@@ -2452,6 +2454,8 @@ class RobertaSpanReasoningMultihop4Model(Model):
                 self.scorer = Linear(transformer_config.hidden_size*4, 1)
             elif self.ablation in ["B1", "B2", "S"]:
                 self.scorer = Linear(transformer_config.hidden_size*5, 1)
+            elif self.ablation == "ALL":
+                self.scorer = Linear(transformer_config.hidden_size*2, 1)
             else:
                 self.scorer = Linear(transformer_config.hidden_size*6, 1)
 
@@ -2608,6 +2612,8 @@ class RobertaSpanReasoningMultihop4Model(Model):
             reps = torch.cat((cands_reps, B_reps1, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
         elif self.ablation == "S":
             reps = torch.cat((cands_reps, B_reps1, B_reps2, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
+        elif self.ablation == "ALL":
+            reps = cands_reps
         else:    
             reps = torch.cat((cands_reps, B_reps1, B_reps2, S_reps, Q_reps.unsqueeze(1).expand(-1, cands_num, -1)), dim=-1)
 
